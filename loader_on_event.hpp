@@ -77,6 +77,7 @@ struct AddonFunctions {
     void* on_init_pipeline = nullptr;
     void* on_bind_pipeline = nullptr;
     void* on_init_pipeline_layout = nullptr;
+    void* on_create_pipeline_layout = nullptr;
     void* on_draw = nullptr;
     void* on_draw_indexed = nullptr;
     void* on_draw_indirect = nullptr;
@@ -97,6 +98,8 @@ struct AddonFunctions {
     void* on_update_descriptor_tables = nullptr;
     void* on_copy_descriptor_tables = nullptr;
     void* on_reset_command_list = nullptr;
+    void* on_init_device = nullptr;
+    void* on_destroy_device = nullptr;
     
 };
 
@@ -194,6 +197,7 @@ private:
         funcs.on_init_pipeline = GetProcAddress(addon_module, "vrem_on_init_pipeline");
         funcs.on_bind_pipeline = GetProcAddress(addon_module, "vrem_on_bind_pipeline");
         funcs.on_init_pipeline_layout = GetProcAddress(addon_module, "vrem_on_init_pipeline_layout");
+        funcs.on_create_pipeline_layout = GetProcAddress(addon_module, "vrem_on_create_pipeline_layout");
         funcs.on_draw = GetProcAddress(addon_module, "vrem_on_draw");
         funcs.on_draw_indexed = GetProcAddress(addon_module, "vrem_on_draw_indexed");
         funcs.on_draw_indirect = GetProcAddress(addon_module, "vrem_on_draw_indirect");
@@ -211,6 +215,8 @@ private:
         funcs.on_update_descriptor_tables = GetProcAddress(addon_module, "vrem_on_update_descriptor_tables");
         funcs.on_copy_descriptor_tables = GetProcAddress(addon_module, "vrem_on_copy_descriptor_tables");
         funcs.on_reset_command_list = GetProcAddress(addon_module, "vrem_on_reset_command_list");
+        funcs.on_init_device = GetProcAddress(addon_module, "vrem_on_init_device");
+        funcs.on_destroy_device = GetProcAddress(addon_module, "vrem_on_destroy_device");
 
 
         // reshade::log::message(reshade::log::level::info,"DCS VREM: Addon chargé avec succès");
@@ -299,6 +305,15 @@ static void on_init_pipeline_layout(device* dev, uint32_t count,
         typedef void (*Func)(device*, uint32_t, const pipeline_layout_param*, pipeline_layout);
         ((Func)g_reloader->get_functions().on_init_pipeline_layout)(dev, count, params, layout);
     }
+}
+
+static bool on_create_pipeline_layout(device* dev, uint32_t& param_count, pipeline_layout_param*& params)
+{
+    if (g_reloader && g_reloader->get_functions().on_create_pipeline_layout) {
+        typedef bool (*Func)(device*, uint32_t&, pipeline_layout_param*&);
+        return ((Func)g_reloader->get_functions().on_create_pipeline_layout)(dev, param_count, params);
+    }
+    return false;
 }
 
 static bool on_draw(command_list* cmd, uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) {
@@ -408,6 +423,20 @@ static void on_reset_command_list(command_list* cmd_list) {
     }
 }
 
+static void on_init_device(device* device) {
+    if (g_reloader && g_reloader->get_functions().on_init_device) {
+        typedef void (*Func)(reshade::api::device*);
+        ((Func)g_reloader->get_functions().on_init_device)(device);
+    }
+}
+
+static void on_destroy_device(device* device) {
+    if (g_reloader && g_reloader->get_functions().on_destroy_device) {
+        typedef void (*Func)(reshade::api::device*);
+        ((Func)g_reloader->get_functions().on_destroy_device)(device);
+    }
+}
+
 static void on_bind_descriptor_tables(command_list* cmd_list, shader_stage stages,pipeline_layout layout, uint32_t first,    uint32_t count, const descriptor_table* tables) {
     if (g_reloader && g_reloader->get_functions().on_bind_descriptor_tables) {
         typedef void (*Func)(reshade::api::command_list*, shader_stage, pipeline_layout, uint32_t, uint32_t, const descriptor_table*);
@@ -441,6 +470,7 @@ extern bool vrem_on_draw_indexed(command_list* commandList, uint32_t index_count
 extern bool vrem_on_drawOrDispatch_indirect(command_list* commandList, indirect_command type, resource buffer, uint64_t offset, uint32_t draw_count, uint32_t stride);
 extern void vrem_on_init_pipeline(device* device, pipeline_layout layout, uint32_t subobjectCount, const pipeline_subobject* subobjects, pipeline pipelineHandle);
 extern void vrem_on_init_pipeline_layout(device* dev, uint32_t paramCount, const pipeline_layout_param* params, pipeline_layout layout);
+extern bool vrem_on_create_pipeline_layout(device* dev, uint32_t& param_count, pipeline_layout_param*& params);
 extern void vrem_on_push_descriptors(command_list* cmd_list, shader_stage stages, pipeline_layout layout, uint32_t param_index, const descriptor_table_update& update);
 extern void vrem_on_reshade_reloaded_effects(effect_runtime* runtime);
 extern void vrem_on_reshade_begin_effects(effect_runtime* runtime, command_list* cmd_list, resource_view rtv, resource_view rtv_srgb);
@@ -449,6 +479,8 @@ extern void vrem_on_init_swapchain(swapchain* swapchain);
 extern void vrem_on_init_command_list(command_list* cmd_list);
 extern void vrem_on_destroy_command_list(command_list* cmd_list);
 extern void vrem_on_reset_command_list(command_list* cmd_list);
+extern void vrem_on_init_device(device* device);
+extern void vrem_on_destroy_device(device* device);
 extern void vrem_on_bind_descriptor_tables(command_list* cmd_list, shader_stage stages, pipeline_layout layout, uint32_t first, uint32_t count, const descriptor_table* tables);
 extern bool vrem_on_update_descriptor_tables(device* device, uint32_t count, const descriptor_table_update* updates);
 extern bool vrem_on_copy_descriptor_tables(device* device, uint32_t count, const descriptor_table_copy* copies);

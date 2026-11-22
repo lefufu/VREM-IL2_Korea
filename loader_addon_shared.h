@@ -57,8 +57,6 @@
 // name of addon .dll
 #define VREM_ADDON_NAME "Korea_VREM.dll"
 
-#define MAX_OBJ_PER_PIPELINE 5
-
 #ifdef _DEBUG
 #define _DEBUG_LOGS 1
 #else
@@ -78,7 +76,7 @@ static const std::set<pipeline_subobject_type> ALLOWED_SHADERS = {
 };
 
 //max number of objects in pipeline (to filter some case with invalid number
-#define MAX_PIPELINE_OBJECTS 13
+#define MAX_PIPELINE_OBJECTS 14
 
 
 // Structure to store all pipeline infos
@@ -116,7 +114,7 @@ struct save_pipeline {
     // metadata for identification
     uint32_t vs_hash;
     uint32_t ps_hash;
-    uint32_t hash[MAX_OBJ_PER_PIPELINE];
+    uint32_t hash[MAX_PIPELINE_OBJECTS];
 
 	//for DX12 pipeline cloning
     std::vector<reshade::api::dynamic_state> dynamic_states;
@@ -193,7 +191,21 @@ struct technique_trace {
     int quad_view_target; // 0 : all, 1 Outer, 2 Innner
     bool is_VREM;
 };
+
+
 // Structure to hold shared variables
+
+// for constant buffer injected in shaders for mod settings
+struct PersistentCBData {
+    reshade::api::resource     buf = {};
+	uint8_t* ptr = nullptr;            // permanently mapped pointer to the buffer
+    reshade::api::buffer_range range[2] = {};            // [0] left, [1] right
+    std::unordered_map<uint64_t, uint32_t> layout_param_index; // layout   -> index of CB param
+    std::unordered_map<uint64_t, uint64_t> pipeline_layout;    // pipeline -> layout
+    std::shared_mutex          mutex;
+};
+
+// shared variables between addon and launcher
 struct SharedState {
     reshade::api::device* device = {};
     reshade::api::effect_runtime* runtime = nullptr;
@@ -212,9 +224,10 @@ struct SharedState {
 #endif
 
 #if _DEBUG_LOGS
-    bool debug_log = true;
+    uint32_t debug_log = 1;
+	// log level : 0 = no log, 1 = info, 2 = verbose
 #else
-    bool debug_log = false;
+    uint32_t debug_log = 0;
 #endif
 
     // capture button
@@ -224,6 +237,7 @@ struct SharedState {
 	bool filtered_pipeline_to_setup = true;
   
     PersistentPipelineData VREM_pipelines = {};
+    PersistentCBData VREM_cb = {};
 
     reshade::api::pipeline_layout DX11_layout = {};
 

@@ -64,6 +64,16 @@ bool request_capture = false;   // demande utilisateur
 bool flag_capture = false;      // capture ACTIVE (ex-capturing)
 bool frame_started = false;     // au moins un bind_pipeline vu
 
+/*
+resource      g_buf = {};
+uint8_t* g_ptr = nullptr;
+buffer_range  g_range[2] = {};
+//ShaderInjectData g_settings = {};
+//std::atomic<bool> g_dirty{ false };
+std::unordered_map<uint64_t, pipeline_info> g_pipeline_info;
+std::unordered_map<uint64_t, uint32_t>      g_layout_param_index;
+std::shared_mutex                           g_mutex;
+*/
 
 // for logging shader_resource_view in push_descriptors() to get depthStencil 
 // bool track_for_texture = false;
@@ -83,7 +93,8 @@ bool do_not_draw = false;
 //
 // structure to contain shaders/pipeline to process, regarding mod option selected
 //std::unordered_map<uint64_t, Shader_Definition> filtered_pipeline;
-std::unordered_map<uint64_t, std::vector<Shader_Definition>> filtered_pipeline;
+// std::unordered_map<uint64_t, std::vector<Shader_Definition>> filtered_pipeline;
+std::unordered_map<uint64_t, FilteredPipelineData> filtered_pipeline;
 
 std::unordered_map<uint32_t, std::vector<uint8_t>> shader_code_cache;
 
@@ -142,11 +153,13 @@ extern "C" {
 			shader_def.hash = hash;
 			
 			//replace action_replace by action_replace_bind for hot reload
+			
 			if ((shader_def.action & action_replace) && g_shared_state->debug)
 			{
 				shader_def.action = (shader_def.action & ~action_replace) | action_replace_bind;
 
 			}
+			
 			
 		}
 
@@ -191,6 +204,8 @@ extern "C" {
 		//intialize the counters
 		intialize_counters();
 
+		//ensure the CB8 buffer is created (if not done)
+		vrem_ensure_cb_buffer(g_shared_state->device);
 
 #if _DEBUG_CRASH reshade::log::message(reshade::log::level::info, "addon - vrem_init ended");
 #endif

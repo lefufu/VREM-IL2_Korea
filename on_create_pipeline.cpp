@@ -52,63 +52,77 @@
 
 extern std::unordered_map<uint32_t, std::vector<uint8_t>> shader_code_cache;
 
+// hash of the code AFTER static replacement -> hash of the original shader
+std::unordered_map<uint32_t, uint32_t> replaced_hash_origin;
+
 using namespace reshade::api;
 
 // *******************************************************************************************************
+// DXIL (SM6) or DXBC (SM4/5) ? (a DXIL container is a DXBC container with a DXIL chunk)
+// NB : same helper exists in hunting.cpp, move it to a common header
+static bool is_dxil_code(const void* code, size_t size)
+{
+	auto p = static_cast<const uint8_t*>(code);
+	if (size < 32 || memcmp(p, "DXBC", 4) != 0) return false;
+	uint32_t chunks = *reinterpret_cast<const uint32_t*>(p + 28);
+	for (uint32_t i = 0; i < chunks && 32 + 4 * (i + 1) <= size; ++i) {
+		uint32_t off = *reinterpret_cast<const uint32_t*>(p + 32 + 4 * i);
+		if (off + 4 <= size && memcmp(p + off, "DXIL", 4) == 0) return true;
+	}
+	return false;
+}
+
+// *******************************************************************************************************
 // load_shader_code_static() : replace shader code once for all at creation as done by crosire for usage in create_pipeline
-// update pipeline_by_hash with new hash
+// update shader_by_hash with new hash
+// shader_hash = hash of orig_desc computed by the caller (not recomputed here)
 // 
 bool load_shader_code_static(device_api device_type, shader_desc& orig_desc, uint32_t shader_hash)
 {
-	
-	if (orig_desc.code_size == 0)
+	// stage absent or empty : normal in DX12, nothing to do (no log, too verbose)
+	if (orig_desc.code == nullptr || orig_desc.code_size == 0)
+		return false;
+
+	auto it = shader_by_hash.find(shader_hash);
+	// no static replace if debug mode (to allow hot reload of the mod)
+	if (it == shader_by_hash.end() || !(it->second.action & action_replace) || g_shared_state->debug)
+		return false;
+
+	auto it2 = shader_code_cache.find(shader_hash);
+	if (it2 == shader_code_cache.end() || it2->second.empty())
+		return false;
+
+	// replace code by the one from cso
+	const std::vector<uint8_t>& shader_code = it2->second;
+
+	// DX12 : the replaced shader must keep the bytecode format of the original one (DXBC or DXIL),
+	// otherwise the game's own CreatePipelineState fails
+	if (device_type == device_api::d3d12 &&
+		is_dxil_code(shader_code.data(), shader_code.size()) != is_dxil_code(orig_desc.code, orig_desc.code_size))
 	{
-		log_error_loading_shader_code(" on create pipeline - code size zero");
+		log_error_shader_type(shader_hash);
 		return false;
 	}
 
-	//do static replacement of shader code only if not in debug mode, otherwise dynamic replacement is forced in on_bind_pipeline
-	if (!g_shared_state->debug)
-	{
-		uint32_t shader_hash = calculateShaderHash(orig_desc);
-		//check if hash is in shader_by_hash
+	orig_desc.code = shader_code.data();
+	orig_desc.code_size = shader_code.size();
 
-		auto it = shader_by_hash.find(shader_hash);
+	const uint32_t new_shader_hash = calculateShaderHash(orig_desc);
+	replaced_hash_origin[new_shader_hash] = shader_hash;
 
-		if (it != shader_by_hash.end()) {
-
-			if (it->second.action & action_replace)
-			{
-
-				auto it2 = shader_code_cache.find(shader_hash);
-				//if hash found in cache replace code in the cloned desc
-				if (!(it2 == shader_code_cache.end()))
-				{
-
-					// replace code by the one from cso
-					const std::vector<uint8_t>& shader_code = it2->second;
-
-					orig_desc.code = shader_code.data();
-					orig_desc.code_size = shader_code.size();
-
-					uint32_t new_shader_hash = calculateShaderHash(orig_desc);
-					
-					// add a new entry in shader_by_hash with new hash if not existing
-					auto it3 = shader_by_hash.find(new_shader_hash);
-					if (it3 == shader_by_hash.end()) {
-						Shader_Definition new_shader_def = it->second;
-						new_shader_def.hash = new_shader_hash;
-						shader_by_hash.emplace(new_shader_hash, new_shader_def);
-					} 
 #if _DEBUG_LOGS  
-					log_replaced_shader_code(shader_hash, it, new_shader_hash);
+	// log BEFORE emplace : an insertion may rehash the map and invalidate 'it'
+	log_replaced_shader_code(shader_hash, it, new_shader_hash);
 #endif
-					return true;
-				}
-			}
-		}
+
+	// add a new entry in shader_by_hash with new hash if not existing
+	if (shader_by_hash.find(new_shader_hash) == shader_by_hash.end())
+	{
+		Shader_Definition new_shader_def = it->second;   // copy before emplace
+		new_shader_def.hash = new_shader_hash;
+		shader_by_hash.emplace(new_shader_hash, std::move(new_shader_def));
 	}
-	return false;
+	return true;
 }
 
 
@@ -131,7 +145,7 @@ extern "C" {
 		
 #if _DEBUG_LOGS
 		//too verbose
-		//log_on_create_pipeline(layout, subobject_count);
+		log_on_create_pipeline(layout, subobject_count);
 #endif
 		
 		for (uint32_t i = 0; i < subobject_count; ++i)
@@ -141,10 +155,15 @@ extern "C" {
 			if (ALLOWED_SHADERS.count(sub.type) > 0)
 			{
 				auto* desc = static_cast<shader_desc*>(subobjects[i].data);
+				if (desc == nullptr || desc->code == nullptr || desc->code_size == 0)
+					continue;   // stage absent (DX12 : normal)
+
 				const uint32_t shader_hash = calculateShaderHash(*desc);
 
+#if _DEBUG_LOGS
 				//too verbose
-				//log_on_create_pipeline_objects(i, subobjects[i], shader_hash);
+				log_on_create_pipeline_objects(i, subobjects[i], shader_hash);
+#endif
 
 				/*
 				// afficher le hash de ce stage (vertex_shader, pixel_shader, ...)

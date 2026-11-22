@@ -40,23 +40,67 @@
 // * ShortFuse https://github.com/clshortfuse/renodx
 // 
 /////////////////////////////////////////////////////////////////////////
-
 #include <unordered_map>
-#include <unordered_set>
-#include <optional>
 #include <vector>
+#include <algorithm>
+#include <array>
+#include <sstream>
 #include "loader_addon_shared.h"
 #include "addon_functions.h"
 #include "addon_logs.h"
 #include "to_string.hpp"
 
 extern std::unordered_map<uint32_t, std::vector<uint8_t>> shader_code_cache;
+extern std::unordered_map<uint32_t, uint32_t> replaced_hash_origin;   // defined in on_create_pipeline.cpp
 
 // *******************************************************************************************************
-/// <summary>
-/// Check if the shader definition is related to an active option in the mod settings
-/// </summary>
+// hash of an already statically replaced shader -> hash of the original shader (otherwise unchanged)
+static uint32_t resolve_hash(uint32_t h)
+{
+	auto it = replaced_hash_origin.find(h);
+	return (it != replaced_hash_origin.end()) ? it->second : h;
+}
 
+// *******************************************************************************************************
+static bool is_null_definition(const Shader_Definition& d)
+{
+	return d.action == action_null;
+}
+
+// *******************************************************************************************************
+// Add a definition, or replace the existing one if it is a "null" definition
+static void add_or_upgrade_definition(std::vector<Shader_Definition>& defs,
+	const Shader_Definition& def, uint32_t hash)
+{
+	auto it = std::find_if(defs.begin(), defs.end(),
+		[hash](const Shader_Definition& d) { return d.hash == hash; });
+
+	if (it != defs.end())
+	{
+		if (is_null_definition(*it) && !is_null_definition(def))
+		{
+			*it = def;
+			it->hash = hash;
+		}
+		return;
+	}
+
+	Shader_Definition d = def;
+	d.hash = hash;
+	defs.push_back(std::move(d));
+}
+
+// *******************************************************************************************************
+static Shader_Definition make_null_definition(uint32_t hash)
+{
+	Shader_Definition d{};
+	d.hash = hash;
+	d.action = action_null;
+	d.feature = Feature::Null;
+	return d;
+}
+
+// *******************************************************************************************************
 bool check_if_active_option(const Shader_Definition& shader_def)
 {
 	for (uint32_t index : shader_def.VREM_options)
@@ -68,170 +112,153 @@ bool check_if_active_option(const Shader_Definition& shader_def)
 }
 
 // *******************************************************************************************************
-/// <summary>
-/// Find the mod definition matching ONE shader hash.
-/// Assumes shader_by_hash is indexed by shader hash (adapt if is_in_mod_hash does something else).
-/// </summary>
-
-static std::optional<Shader_Definition> find_mod_shader_for_hash(uint32_t hash)
+// Does the (non empty) bytecode of one of the 5 stages of the pipeline match the .cso ?
+static bool pipeline_has_bytecode(const save_pipeline& p, const std::vector<uint8_t>& cso)
 {
-	auto it = shader_by_hash.find(hash);
-	if (it == shader_by_hash.end())
-		return std::nullopt;
-	return it->second;
-}
+	if (cso.empty())
+		return false;
 
-static bool is_shader_subobject(reshade::api::pipeline_subobject_type type)
-{
-	using T = reshade::api::pipeline_subobject_type;
-	return type == T::vertex_shader || type == T::pixel_shader || type == T::geometry_shader
-		|| type == T::hull_shader || type == T::domain_shader || type == T::compute_shader;
+	const std::array<const std::vector<uint8_t>*, 5> stages =
+	{ &p.vs_bytecode, &p.ps_bytecode, &p.gs_bytecode, &p.hs_bytecode, &p.ds_bytecode };
+
+	for (const auto* code : stages)
+	{
+		if (!code->empty() && *code == cso)
+			return true;
+	}
+	return false;
 }
 
 // *******************************************************************************************************
 /// <summary>
-/// setup filtered pipelines regarding mod settings.
-/// filtered_pipeline : std::unordered_map<uint64_t, std::vector<Shader_Definition>>
+/// setup filtered pipelines regarding mod settings (DX12 : several shaders per pipeline)
 /// </summary>
-
 bool setup_filtered_pipelines(reshade::api::device* device, reshade::api::effect_runtime* runtime)
 {
 	for (auto& p : g_shared_state->VREM_pipelines.saved_pipelines)
 	{
-		// Validate pipeline handle
 		if (p.pipeline.handle == 0)
 			continue;
 
-		// pipeline not processed yet?
+		// number of valid entries in p.hash[] / p.subobjects
+		const uint32_t hc = (std::min<uint32_t>)(p.subobject_count, MAX_PIPELINE_OBJECTS);
+
 		if (filtered_pipeline.find(p.pipeline.handle) == filtered_pipeline.end())
 		{
-			// ------------------------------------------------------------------
-			// 1) collect all definitions related to this pipeline
-			// ------------------------------------------------------------------
 			std::vector<Shader_Definition> defs;
-			std::unordered_set<uint32_t> seen_hashes;
 
-			// a) by hash: one lookup per shader subobject
-			for (uint32_t k = 0; k < p.subobject_count; ++k)
+			// ---------------------------------------------------------------
+			// 1) Search by hash on all shaders of the pipeline
+			//    (hash[] + vs_hash/ps_hash for safety, duplicates are removed)
+			//    Unknown hash or inactive option => null definition
+			// ---------------------------------------------------------------
+			std::vector<uint32_t> candidates;
+			candidates.reserve(MAX_PIPELINE_OBJECTS + 2);
+
+			for (uint32_t i = 0; i < hc; ++i)
+				candidates.push_back(p.hash[i]);
+			candidates.push_back(p.vs_hash);
+			candidates.push_back(p.ps_hash);
+
+			for (uint32_t h : candidates)
 			{
-				if (!is_shader_subobject(p.subobjects[k].type))
+				if (h == 0)
 					continue;
 
-				std::optional<Shader_Definition> opt = find_mod_shader_for_hash(p.hash[k]);
-				if (opt.has_value() && seen_hashes.insert(p.hash[k]).second)
-				{
-					opt->hash = p.hash[k];
-					defs.push_back(*opt);
-				}
+				h = resolve_hash(h);   // 0x7ebd... (replaced code) -> 0xbaf5... (original)
+
+				auto it = shader_by_hash.find(h);
+				if (it != shader_by_hash.end() && check_if_active_option(it->second))
+					add_or_upgrade_definition(defs, it->second, h);
+				else
+					add_or_upgrade_definition(defs, make_null_definition(h), h);
 			}
 
-			// b) static replacement: bytecode comparison
+			// ---------------------------------------------------------------
+			// 2) Static replacement : pipeline bytecode vs .cso
+			// ---------------------------------------------------------------
 			for (auto& [orig_hash, shader_def] : shader_by_hash)
 			{
 				if (!(shader_def.action & action_replace)) continue;
-				if (seen_hashes.count(orig_hash)) continue;
+				if (!check_if_active_option(shader_def)) continue;
 
 				auto it_cso = shader_code_cache.find(orig_hash);
 				if (it_cso == shader_code_cache.end()) continue;
 
-				if (p.ps_bytecode == it_cso->second || p.vs_bytecode == it_cso->second)
-				{
-					Shader_Definition def = shader_def;
-					def.hash = orig_hash;
-					seen_hashes.insert(orig_hash);
-					defs.push_back(def);
-				}
+				if (pipeline_has_bytecode(p, it_cso->second))
+					add_or_upgrade_definition(defs, shader_def, orig_hash);
 			}
 
-			// ------------------------------------------------------------------
-			// 2) keep only active definitions
-			// ------------------------------------------------------------------
-			std::vector<Shader_Definition> active_defs;
-			for (auto& d : defs)
+			// ---------------------------------------------------------------
+			// 3) Registration + single clone if needed
+			// ---------------------------------------------------------------
+			constexpr bool STORE_ALL_PIPELINES = false;   // true = diagnostic
+
+			const bool has_active = std::any_of(defs.begin(), defs.end(),
+				[](const Shader_Definition& d) { return !is_null_definition(d); });
+
+			if (!defs.empty() && (has_active || STORE_ALL_PIPELINES))
 			{
-				bool active = check_if_active_option(d);
-#if _DEBUG_LOGS
-				log_shader(p.pipeline, d, active);
-#endif
-				if (active)
-					active_defs.push_back(d);
-			}
+				FilteredPipelineData data{};
+				data.cloned_pipeline = {};
 
-			if (!active_defs.empty())
-			{
-				// --------------------------------------------------------------
-				// 3) a SINGLE clone, with only the active hashes
-				//    (0 = "do not replace this subobject", 0 must not be a key of shader_code_cache)
-				// --------------------------------------------------------------
-				std::vector<uint32_t> clone_hashes(p.subobject_count, 0);
-				bool need_clone = false;
+				const bool need_clone = std::any_of(defs.begin(), defs.end(),
+					[](const Shader_Definition& d) { return (d.action & action_replace_bind) != 0; });
 
-				for (auto& d : active_defs)
-				{
-					if (!(d.action & action_replace_bind))
-						continue;
-
-					for (uint32_t k = 0; k < p.subobject_count; ++k)
-					{
-						if (is_shader_subobject(p.subobjects[k].type) && p.hash[k] == d.hash)
-						{
-							clone_hashes[k] = d.hash;
-							need_clone = true;
-						}
-					}
-				}
+				bool clone_failed = false;
 
 				if (need_clone)
 				{
-					reshade::api::pipeline cloned_pipeline =
-						clone_pipeline(p.device, p.layout, p.subobject_count,
-							p.subobjects, p.pipeline, clone_hashes.data());
+					// hashes to replace, aligned on the subobject index.
+					// 0 = keep the original shader.
+					uint32_t clone_hash[MAX_PIPELINE_OBJECTS] = {};
 
-					if (cloned_pipeline.handle == 0)
+					for (uint32_t i = 0; i < hc; ++i)
 					{
-						log_pipeline_clone_error(p.pipeline.handle);
+						const uint32_t h = resolve_hash(p.hash[i]);
+						if (h == 0)
+							continue;
+
+						const bool to_replace = std::any_of(defs.begin(), defs.end(),
+							[h](const Shader_Definition& d)
+							{ return d.hash == h && (d.action & action_replace_bind) != 0; });
+
+						if (to_replace)
+							clone_hash[i] = h;
+					}
+
+					// rebuilt from the deep-copied members of save_pipeline (like hunting.cpp)
+					pipeline cloned_pipeline = clone_pipeline(p, clone_hash, hc);
+
+					if (cloned_pipeline.handle != 0)
+					{
+						data.cloned_pipeline = cloned_pipeline;
+						cloned_pipeline_list.emplace(cloned_pipeline.handle, cloned_pipeline);
 					}
 					else
 					{
-						// kept so the clones can be destroyed when the addon is reloaded
-						cloned_pipeline_list.emplace(cloned_pipeline.handle, cloned_pipeline);
-
-						// same substitute pipeline for all "bind" definitions
-						for (auto& d : active_defs)
-							if (d.action & action_replace_bind)
-								d.substitute_pipeline = cloned_pipeline;
+						clone_failed = true;
+						std::stringstream s;
+						s << "addon - setup_filtered_pipelines: clone failed for pipeline 0x"
+							<< std::hex << p.pipeline.handle << ", pipeline not registered";
+						reshade::log::message(reshade::log::level::error, s.str().c_str());
 					}
 				}
 
-				filtered_pipeline.emplace(p.pipeline.handle, std::move(active_defs));
+				if (!clone_failed)
+				{
+					data.shader_definitions = std::move(defs);
+					filtered_pipeline.emplace(p.pipeline.handle, std::move(data));
+
 #if _DEBUG_LOGS
-				log_filtered_added(p.pipeline.handle);
+					// ***************************************************************                   
+					// removed because too verbose !
+					log_filtered_added(p.pipeline.handle);
 #endif
+				}
 			}
-		}
-
-		// ----------------------------------------------------------------------
-		// "constant color" pipeline for hunting
-		// IMPORTANT: clone_pipeline reads hash[i] for i < subobject_count,
-		// so the array must have subobject_count elements (otherwise out-of-bounds read in DX12).
-		// ----------------------------------------------------------------------
-		if (p.pipeline.handle == a_shared.first_PS_pipeline_handle)
-		{
-			std::vector<uint32_t> hash_color(p.subobject_count, 0);
-			for (uint32_t k = 0; k < p.subobject_count; ++k)
-			{
-				if (p.subobjects[k].type == reshade::api::pipeline_subobject_type::pixel_shader)
-					hash_color[k] = CONSTANT_HASH;
-			}
-
-			a_shared.cloned_constant_color_pipeline =
-				clone_pipeline(p.device, p.layout, p.subobject_count,
-					p.subobjects, p.pipeline, hash_color.data());
 		}
 	}
 
 	return false;
 }
-
-
-

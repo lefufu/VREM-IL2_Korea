@@ -58,12 +58,43 @@ using namespace reshade::api;
 
 
 //*******************************************************************************************************
+// push the mod settings CB (root CBV) before the draw
+static void vrem_cb_push(command_list* cmd, shader_stage stage)
+{
+	auto& st = cmd->get_private_data<CmdData>();
+	if (!st.cb_active) return;
+
+	auto& cb = g_shared_state->VREM_cb;
+	if (cb.ptr == nullptr) return;
+
+	const buffer_range& range = cb.range[st.eye & 1];
+
+	descriptor_table_update upd = {};
+	upd.binding = 0;
+	upd.count = 1;
+	upd.type = descriptor_type::constant_buffer;
+	upd.descriptors = &range;
+
+	cmd->push_descriptors(stage, st.cb_layout, st.cb_index, upd);
+
+	static int n = 0;
+	if (n++ < 5) {
+		std::stringstream s;
+		s << "addon - push : layout=0x" << std::hex << st.cb_layout.handle << std::dec
+			<< " param_index=" << st.cb_index << " offset=" << range.offset
+			<< " eye=" << st.eye << "; ";
+		reshade::log::message(reshade::log::level::info, s.str().c_str());
+	}
+}
+
+//*******************************************************************************************************
 // process action for the shader/pipeline if needed
 
 void process_actions(command_list* commandList)
 {
 	auto& state = commandList->get_private_data<CmdData>();	
 
+	vrem_cb_push(commandList, shader_stage::all_graphics);
 }
 
 
@@ -128,8 +159,11 @@ extern "C" {
 		if (g_shared_state->shader_hunter && flag_capture) log_ondraw(vertex_count, instance_count, first_vertex, first_instance, commandList);
 
 #endif		
-		if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !a_shared.flag_texture_dump && !a_shared.flag_cb_dump && state.current_action == action_null) return false;
 		
+
+		if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !a_shared.flag_texture_dump && !a_shared.flag_cb_dump && !state.to_process_in_draw) return false;
+		process_actions(commandList);
+
 		bool skip = false;
 		if (state.do_not_draw) skip = true;
 #if _DEBUG_LOGS
@@ -180,7 +214,9 @@ extern "C" {
 		// log_bound_tables(dev, st);
 
 #endif		
-		if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !a_shared.flag_texture_dump && !a_shared.flag_cb_dump && state.current_action == action_null) return false;
+
+		if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !a_shared.flag_texture_dump && !a_shared.flag_cb_dump && !state.to_process_in_draw) return false;
+		process_actions(commandList);
 
 		bool skip = false;
 		if (state.do_not_draw) skip = true;
@@ -193,6 +229,8 @@ extern "C" {
 		// log bound tables
 		//too verbose
 		// log_bound_tables(dev, state);
+
+
 		 		
 		// clear trackign flags
 		clear_tracking_flags();
@@ -219,7 +257,8 @@ extern "C" {
 		// log
 		if (g_shared_state->shader_hunter && flag_capture) log_on_drawOrDispatch_indirect(type, buffer, offset, draw_count, stride, commandList);
 #endif
-		if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !a_shared.flag_texture_dump && !a_shared.flag_cb_dump &&  state.current_action == action_null) return false;
+		if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !a_shared.flag_texture_dump && !a_shared.flag_cb_dump && !state.to_process_in_draw) return false;
+		process_actions(commandList);
 		
 		bool skip = false;
 		if (state.do_not_draw) skip = true;
@@ -230,6 +269,8 @@ extern "C" {
 		// log bound tables
 		//too verbose
 		// log_bound_tables(dev, state);
+
+		
 #endif
 		// clear trackign flags
 		clear_tracking_flags();

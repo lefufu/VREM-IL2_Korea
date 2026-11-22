@@ -345,6 +345,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         // !!! warning !!! to optimize performance there is a filtering setup in on_bind_pipeline() to limit processing to ALLOWED_STAGES
         reshade::register_event<reshade::addon_event::bind_pipeline>(on_bind_pipeline);
         reshade::register_event<reshade::addon_event::init_pipeline_layout>(on_init_pipeline_layout);
+        reshade::register_event<reshade::addon_event::create_pipeline_layout>(on_create_pipeline_layout);
         reshade::register_event<reshade::addon_event::draw>(on_draw);
         reshade::register_event<reshade::addon_event::draw_indexed>(on_draw_indexed);
         reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(on_draw_indirect);
@@ -360,6 +361,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         reshade::register_event<reshade::addon_event::update_descriptor_tables>(on_update_descriptor_tables);
         reshade::register_event<reshade::addon_event::copy_descriptor_tables>(on_copy_descriptor_tables);
         reshade::register_event<reshade::addon_event::reset_command_list>(on_reset_command_list);
+        reshade::register_event<reshade::addon_event::init_device>(on_init_device);
+        reshade::register_event<reshade::addon_event::destroy_device>(on_destroy_device);
 
         
 
@@ -377,6 +380,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         // !!! warning !!! to optimize performance there is a filtering setup in on_bind_pipeline() to limit processing to ALLOWED_STAGES
         reshade::register_event<reshade::addon_event::bind_pipeline>(vrem_on_bind_pipeline);
         reshade::register_event<reshade::addon_event::init_pipeline_layout>(vrem_on_init_pipeline_layout);
+        reshade::register_event<reshade::addon_event::create_pipeline_layout>(vrem_on_create_pipeline_layout);
         reshade::register_event<reshade::addon_event::draw>(vrem_on_draw);
         reshade::register_event<reshade::addon_event::draw_indexed>(vrem_on_draw_indexed);
         reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(vrem_on_drawOrDispatch_indirect);
@@ -392,6 +396,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         reshade::register_event<reshade::addon_event::update_descriptor_tables>(vrem_on_update_descriptor_tables);
         reshade::register_event<reshade::addon_event::copy_descriptor_tables>(vrem_on_copy_descriptor_tables);
         reshade::register_event<reshade::addon_event::reset_command_list>(vrem_on_reset_command_list);
+        reshade::register_event<reshade::addon_event::init_device>(vrem_on_init_device);
+        reshade::register_event<reshade::addon_event::destroy_device>(vrem_on_destroy_device);
 #endif
 		reshade::register_event<reshade::addon_event::reshade_set_technique_state>(on_reshade_set_technique_state);																										   
         //reshade::register_event<reshade::addon_event::destroy_pipeline>(on_destroy_pipeline); 
@@ -415,6 +421,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         reshade::unregister_event<reshade::addon_event::init_pipeline>(on_init_pipeline);
         reshade::unregister_event<reshade::addon_event::bind_pipeline>(on_bind_pipeline);
         reshade::unregister_event<reshade::addon_event::init_pipeline_layout>(on_init_pipeline_layout);
+        reshade::unregister_event<reshade::addon_event::create_pipeline_layout>(on_create_pipeline_layout);
         reshade::unregister_event<reshade::addon_event::draw>(on_draw);
         reshade::unregister_event<reshade::addon_event::draw_indexed>(on_draw_indexed);
         reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(on_draw_indirect);
@@ -431,6 +438,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         reshade::unregister_event<reshade::addon_event::update_descriptor_tables>(on_update_descriptor_tables);
         reshade::unregister_event<reshade::addon_event::copy_descriptor_tables>(on_copy_descriptor_tables);
         reshade::unregister_event<reshade::addon_event::reset_command_list>(on_reset_command_list);
+        reshade::unregister_event<reshade::addon_event::init_device>(on_init_device);
+        reshade::unregister_event<reshade::addon_event::destroy_device>(on_destroy_device);
 #else
         //cleaning of addon variables if no hot reload
         vrem_cleanup(nullptr);
@@ -441,6 +450,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         reshade::unregister_event<reshade::addon_event::init_pipeline>(vrem_on_init_pipeline);
         reshade::unregister_event<reshade::addon_event::bind_pipeline>(vrem_on_bind_pipeline);
         reshade::unregister_event<reshade::addon_event::init_pipeline_layout>(vrem_on_init_pipeline_layout);
+        reshade::unregister_event<reshade::addon_event::create_pipeline_layout>(vrem_on_create_pipeline_layout);
         reshade::unregister_event<reshade::addon_event::draw>(vrem_on_draw);
         reshade::unregister_event<reshade::addon_event::draw_indexed>(vrem_on_draw_indexed);
         reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(vrem_on_drawOrDispatch_indirect);
@@ -455,6 +465,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         reshade::unregister_event<reshade::addon_event::update_descriptor_tables>(vrem_on_update_descriptor_tables);
         reshade::unregister_event<reshade::addon_event::copy_descriptor_tables>(vrem_on_copy_descriptor_tables);
         reshade::unregister_event<reshade::addon_event::reset_command_list>(vrem_on_reset_command_list);
+        reshade::unregister_event<reshade::addon_event::init_device>(vrem_on_init_device);
 #endif
         reshade::unregister_event<reshade::addon_event::reshade_set_technique_state>(on_reshade_set_technique_state);
 		//reshade::unregister_event<reshade::addon_event::destroy_pipeline>(on_destroy_pipeline);

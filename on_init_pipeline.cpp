@@ -48,6 +48,7 @@
 #include "addon_functions.h"
 #include "addon_objects.h"
 #include "addon_logs.h"
+#include "addon_injection.h"
 
 #include "to_string.hpp"
 
@@ -93,12 +94,12 @@ extern "C" {
 	*/
 
 	//*******************************************************************************
-	VREM_EXPORT void vrem_on_init_pipeline(device* device, pipeline_layout layout, uint32_t subobjectCount, const pipeline_subobject* subobjects, pipeline pipelineHandle)
+	VREM_EXPORT void vrem_on_init_pipeline(device* device, pipeline_layout layout, uint32_t subobjectCount, const pipeline_subobject* subobjects, pipeline pipe)
 	{
 		// save needed pipelines as init_pipeline is called once per game launch
 		// only shader types defined in ALLOWED_SHADERS are saved
 
-		save_pipeline_in_list(device, layout, subobjectCount, subobjects, pipelineHandle);
+		save_pipeline_in_list(device, layout, subobjectCount, subobjects, pipe);
 
 		// if init_pipeline after creation of filtered pipeline list, request an update
 		if (!g_shared_state->filtered_pipeline_to_setup  && a_shared.VREM_setting[SET_DEFAULT]) {
@@ -106,6 +107,21 @@ extern "C" {
 		}
 
 		g_shared_state->DX11_layout = layout;
+
+		// if (pipe.handle == 0 || !is_replaced(pipe)) return;
+
+		if (pipe.handle == 0 ) return;
+
+		// pipeline -> layout (persistant) : used at bind to find the CB parameter of the root signature
+		{
+			auto& cb = g_shared_state->VREM_cb;
+			std::unique_lock lock(cb.mutex);
+			if (cb.layout_param_index.count(layout.handle))
+				cb.pipeline_layout[pipe.handle] = layout.handle;
+			else
+				cb.pipeline_layout.erase(pipe.handle);
+		}
+
 	}
 #ifdef _DEBUG
 }

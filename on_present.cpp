@@ -79,12 +79,12 @@ void intialize_counters()
     track_for_texture = false;
 
 	last_RTV_saved.copied = false;
+
     // initialize flags for texture copy
     current_DepthStencil_handle = 0;
     for (auto& [handle, ds_copy] : a_shared.copied_textures) {
         ds_copy.copied = false;
     }
-
 
 }
 
@@ -203,7 +203,7 @@ extern "C" {
 
 		// to get VREM settings => read from uniform values (if overlay is open or at first init)
         if (g_shared_state->overlay_is_open || addon_init == true) {
-            //get_uniform_and_techniques(runtime);
+            get_uniform_and_techniques(runtime);
             addon_init = false;
         }
   
@@ -231,8 +231,6 @@ extern "C" {
 #if _DEBUG_LOGS
             log_waiting_setting();
 
-            //for WIP
-            a_shared.VREM_setting[SET_DEFAULT] = true;
 #endif
         } 
 
@@ -289,6 +287,16 @@ extern "C" {
 
 		//force capture for testing
         // flag_capture = true;
+
+        
+        //update settings in CB8 (one setting per eye)
+
+		//a_shared.cb_inject_values.testFlag = 1.0;
+        a_shared.cb_inject_values.testFlag = a_shared.VREM_setting[SET_DEBUG];
+
+        // write_settings(a_shared.cb_inject_values);
+        vrem_write_cb();
+        
 
 #if _DEBUG_CRASH  
         reshade::log::message(reshade::log::level::info, "addon - vrem_on_reshade_present ending");

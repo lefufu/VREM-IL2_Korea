@@ -56,6 +56,13 @@ extern bool addon_init;
 //*****************************************************************************
 // mod parameters
 // 
+
+// maximum number of pipeline to be replaced
+//static uint32_t  MAX_PIPELINES = 1024;
+constexpr uint32_t SLOT_SIZE = (sizeof(ShaderInjectData) + 255) & ~255u;
+constexpr uint64_t BUFFER_SIZE = 2 * SLOT_SIZE;
+
+
 //name of ini file to save techniques status
 inline std::string technique_iniFileName = "techniques.ini";
 
@@ -141,7 +148,7 @@ static const uint32_t action_injectText = 0b000010000;
 static const uint32_t action_count = 0b000100000;
 //replace_bind = the shader will be replaced by a modded one during bind
 static const uint32_t action_replace_bind = 0b001000000;
-//inject constant buffer
+//inject constant buffer (if not sttings)
 static const uint32_t action_injectCB = 0b010000000;
 // dump texture or resources (for hunting in debug version)
 static const uint32_t action_dump = 0b100000000;
@@ -149,6 +156,8 @@ static const uint32_t action_dump = 0b100000000;
 static const uint32_t action_get_text = 0b1000000000;
 // get texture 
 static const uint32_t action_renderTechnique = 0b10000000000;
+// inject parameters from settings
+static const uint32_t action_inject_settings = 0b100000000000;
 
 //for logging and debugging : mapping between action flag and name for display
 struct ActionFlag {
@@ -168,6 +177,7 @@ static const ActionFlag action_flags[] = {
 	{ action_dump, "dump" },
 	{ action_get_text, "action_get_text" },
 	{ action_renderTechnique, "action_renderTechnique" },
+	{ action_inject_settings, "inject_settings" },
 
 };
 
@@ -225,6 +235,7 @@ enum class Feature : uint32_t
 
 // mapping between technique name and feature for debug display
 inline std::unordered_map<Feature, std::string> debug_feature_name = {
+	{Feature::Null, "Null"},
 	{Feature::Rotor, "Rotor"},
 	{Feature::Global, "Global"},
 	{Feature::Label, "Label"},
@@ -264,7 +275,7 @@ constexpr uint8_t SET_DEFAULT = 0;
 constexpr uint8_t SET_MISC = 1;
 constexpr uint8_t SET_TECHNIQUE = 2;
 constexpr uint8_t SET_STOPWATCH = 3;
-constexpr uint8_t SET_DUMMY = 10;
+constexpr uint8_t SET_DEBUG = 10;
 
 // 
 // update mapping between technique name and feature at bottom of the file
@@ -288,6 +299,31 @@ static const uint32_t VK_STOPWATCH_MOD_RESET = VK_CONTROL;
 // not to be modified : declaration of class & objects used for the mod logic and shared between functions
 // 
 // for private_data 
+
+// static thread_local std::vector<pipeline_layout_param> s_params;
+// static thread_local uint32_t s_added_index;
+
+struct Pipeline_Hash_and_Actions {
+	uint32_t hash;
+	uint32_t action;
+	Feature feature;
+};
+
+/*struct pipeline_info {
+	reshade::api::pipeline_layout layout;
+	uint32_t                      param_index;
+};
+*/
+
+extern reshade::api::resource      g_buf;
+extern uint8_t* g_ptr;
+extern reshade::api::buffer_range  g_range[2];
+//extern ShaderInjectData            g_settings;
+// extern std::atomic<bool>           g_dirty;
+// extern std::unordered_map<uint64_t, pipeline_info> g_pipeline_info;
+extern std::unordered_map<uint64_t, uint32_t>      g_layout_param_index;
+extern std::shared_mutex                           g_mutex;
+
 struct __declspec(uuid("13A636BD-08E1-4A42-BFD4-E7102EE0E6E0"))
 	CmdData {
 	bool do_not_draw = false;
@@ -299,13 +335,17 @@ struct __declspec(uuid("13A636BD-08E1-4A42-BFD4-E7102EE0E6E0"))
 	uint32_t current_action = 0;
 	uint32_t current_hash = 0;
 	uint64_t current_handle = 0;
+	bool to_process_in_draw = false;
+	std::vector<Pipeline_Hash_and_Actions> current_hashes;
+
+	// mod settings CB : to be pushed before the draw
+	bool                          cb_active = false;
+	reshade::api::pipeline_layout cb_layout = {};
+	uint32_t                      cb_index = 0;
+	uint32_t                      eye = 0;       // 0 = left, 1 = right
 };
 
-struct Pipeline_Hash_and_Actions {
-	uint32_t hash;
-	uint32_t action;
-	Feature feature;
-};
+
 
 // structure to contain actions to process shader/pipeline
 struct Shader_Definition {
@@ -313,7 +353,7 @@ struct Shader_Definition {
 	Feature feature; // to class pipeline/shader by mod feature
 	wchar_t replace_filename[MAXNAMECHAR]; //file name of the modded shader, used only for action "replace"
 	uint32_t draw_count; //used only for action "skip"
-	reshade::api::pipeline substitute_pipeline; //cloned pipeline/shader with code changed
+	//reshade::api::pipeline substitute_pipeline; //cloned pipeline/shader with code changed
 	uint32_t hash;
 	std::vector<uint32_t> VREM_options;
 
@@ -493,11 +533,17 @@ struct __declspec(uuid("6598CABA-191D-4E3C-8D3E-F61427F2BA51")) addon_shared
 
 };
 
+struct FilteredPipelineData {
+	pipeline cloned_pipeline;
+	std::vector<Shader_Definition> shader_definitions;
+};
+
 extern struct addon_shared a_shared;
 
 extern std::unordered_map<uint32_t, Shader_Definition> shader_by_hash;
 //extern std::unordered_map<uint64_t, Shader_Definition> filtered_pipeline;
-extern std::unordered_map<uint64_t, std::vector<Shader_Definition>> filtered_pipeline;
+//extern std::unordered_map<uint64_t, std::vector<Shader_Definition>> filtered_pipeline;
+extern std::unordered_map<uint64_t, FilteredPipelineData> filtered_pipeline;
 extern std::unordered_map<uint64_t, reshade::api::pipeline> cloned_pipeline_list;
 
 
@@ -508,6 +554,10 @@ extern bool frame_started;     // au moins un bind_pipeline vu
 
 // to skip draw call if some shader are to be skipped
 extern bool do_not_draw;
+
+// for DX12 CB
+
+
 
 //*****************************************************************************
 // add here variables to track and handle texture copy or technique injection
@@ -539,8 +589,9 @@ inline  std::unordered_map<uint32_t, Shader_Definition> shader_by_hash =
 	//** DEFAULT **
 	// to filter out call for GUI and MFD
 	// use also to get RT in VR !
-	{ 0xbaf52bc8, Shader_Definition(action_log, Feature::GUI, L"", 0, {SET_DEFAULT}) },
-
+	{ 0xbaf52bc8, Shader_Definition(action_log | action_replace | action_inject_settings, Feature::GUI, L"hangar_test_PS.cso", 0, {SET_DEFAULT}) },
+	//{ 0xbaf52bc8, Shader_Definition(action_log | action_replace_bind, Feature::GUI, L"0xBAF52BC8.cso", 0, {SET_DEFAULT}) },
+	
 };
 
 //*****************************************************************************
@@ -554,7 +605,7 @@ inline  std::unordered_map<uint32_t, Shader_Definition> shader_by_hash =
 // settings
 inline std::unordered_map<std::string, int> settings_mapping = {
 	{"set_default", SET_DEFAULT},
-	{"set_misc", SET_MISC},
+	{"set_debug", SET_DEBUG},
 	{"set_technique", SET_TECHNIQUE },
 };
 

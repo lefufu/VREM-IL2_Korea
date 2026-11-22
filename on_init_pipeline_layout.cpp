@@ -138,7 +138,35 @@ extern "C" {
 		//log_init_pipeline_layout(paramCount, params, layout);
 
 #endif
-        save_pipeline_layout_in_list(dev, paramCount, params,layout);
+        if (layout.handle == 0 || paramCount == 0) return;
+
+        const pipeline_layout_param& last = params[paramCount - 1];
+        const bool ours = last.type == pipeline_layout_param_type::push_descriptors
+            && last.push_descriptors.type == descriptor_type::constant_buffer
+            && last.push_descriptors.dx_register_index == (uint32_t)CBINDEX
+            && last.push_descriptors.dx_register_space == (uint32_t)CBSPACE;
+
+        auto& cb = g_shared_state->VREM_cb;
+        {
+            std::unique_lock lock(cb.mutex);
+            if (ours)
+                cb.layout_param_index[layout.handle] = paramCount - 1;
+            else
+                cb.layout_param_index.erase(layout.handle);   // handle réutilisé : on supprime l'ancienne entrée
+        }
+
+#if _DEBUG_LOGS
+        if (ours) {
+            std::stringstream s;
+            s << "addon - init_pipeline_layout : layout 0x" << std::hex << layout.handle
+                << std::dec << " param_index=" << (paramCount - 1) << "; ";
+            reshade::log::message(reshade::log::level::info, s.str().c_str());
+        }
+#endif
+
+        // CHECK : only used in log at this stage of VREM
+        save_pipeline_layout_in_list(dev, paramCount, params, layout);
+
 	}
 #ifdef _DEBUG
 }

@@ -666,8 +666,8 @@ inline std::string to_string(const Shader_Definition& shader_def) {
 	if (shader_def.action & action_skip) {
 		ss << ", draw_count: " << std::dec << shader_def.draw_count;
 	}
-
-	ss << ", pipeline: " << (shader_def.substitute_pipeline.handle != 0 ? "valid" : "null");
+	
+	// ss << ", pipeline: " << (shader_def.cloned_pipeline_handle != 0 ? "valid" : "null");
 
 	if (!shader_def.VREM_options.empty()) {
 		ss << ", VREM_options: [";

@@ -108,4 +108,7 @@ void delete_persistant_objects() {
     //std::unordered_map<uint64_t, PipeLine_Definition>().swap(g_shared_state_l.VREM_pipelines.pipeline_by_handle);
     // delete saved pipelines
     delete_all_saved_pipelines();
+
+    g_shared_state_l.VREM_cb.layout_param_index.clear();
+    g_shared_state_l.VREM_cb.pipeline_layout.clear();
 }

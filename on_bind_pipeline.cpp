@@ -173,6 +173,7 @@ void process_action_injectText(command_list* commandList, std::unordered_map<uin
 }
 //*******************************************************************************
 // replace shader if needed and inject CB for mod parameters
+/*
 void process_action_replace(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle, std::unordered_map<uint64_t, Shader_Definition>::iterator it)
 {
 	// TODO : add optimization to avoid pushing CB13 if not needed
@@ -203,6 +204,7 @@ void process_action_replace(command_list* commandList, pipeline_stage stages, pi
 #endif
 	}
 }
+*/
 
 //*******************************************************************************
 // setup flags to get texture
@@ -428,12 +430,57 @@ void process_action_injectCB(command_list* commandList, std::unordered_map<uint6
 	
 }
 
+
+
+//*******************************************************************************
+// prepare the push of the mod settings CB : done at bind, executed before the draw
+static void vrem_cb_prepare(CmdData& st, const pipeline& pipe, const FilteredPipelineData& data)
+{
+	bool wanted = false;
+	for (const auto& def : data.shader_definitions)
+	{
+		if (def.action & action_inject_settings) { wanted = true; break; }
+	}
+	if (!wanted) return;
+
+	auto& cb = g_shared_state->VREM_cb;
+	std::shared_lock lock(cb.mutex);
+
+	auto pl = cb.pipeline_layout.find(pipe.handle);
+	if (pl == cb.pipeline_layout.end())
+	{
+		static int n = 0;
+		if (n++ < 5) {
+			std::stringstream s;
+			s << "addon - bind_pipeline : pipe=0x" << std::hex << pipe.handle << " sans layout CB; ";
+			reshade::log::message(reshade::log::level::info, s.str().c_str());
+		}
+		return;
+	}
+	auto li = cb.layout_param_index.find(pl->second);
+	if (li == cb.layout_param_index.end()) return;
+
+	st.cb_layout.handle = pl->second;
+	st.cb_index = li->second;
+	st.cb_active = true;
+
+	static int n2 = 0;
+	if (n2++ < 5) {
+		std::stringstream s;
+		s << "addon - bind_pipeline : pipe=0x" << std::hex << pipe.handle << " layout=0x" << pl->second
+			<< std::dec << " param_index=" << li->second << " ACTIF; ";
+		reshade::log::message(reshade::log::level::info, s.str().c_str());
+	}
+}
+
+
+
 #ifdef _DEBUG
 extern "C" {
 #endif
 	//*******************************************************************************
 	// on bind pipeline : do all actions when binding a pipeline
-	VREM_EXPORT void vrem_on_bind_pipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
+	VREM_EXPORT void vrem_on_bind_pipeline(command_list* commandList, pipeline_stage stages, pipeline pipe)
 	{
 
 		// optimize performance by reducing processing to ALLOWED_STAGES
@@ -448,7 +495,7 @@ extern "C" {
 		// store handle if shader hunting and PS, replace pipleine or skip the draw call
 		if (g_shared_state->shader_hunter)
 		{
-			on_bind_pipeline_hunting(commandList, stages, pipelineHandle);
+			on_bind_pipeline_hunting(commandList, stages, pipe);
 			// skip processing if shader hunting
 #if _DEBUG_CRASH  
 			reshade::log::message(reshade::log::level::info, "***** addon - vrem_on_bind_pipeline ended (hunting)");
@@ -458,21 +505,13 @@ extern "C" {
 #endif
 
 		//store the current pipeline handle in the command list private data for later use in on_draw() and on_dispatch()
-		auto& state = commandList->get_private_data<CmdData>();
-		state.pipeline = pipelineHandle;
-		state.current_action = action_null;
-		state.current_feature = Feature::Null;
-
+		auto& st = commandList->get_private_data<CmdData>();
+		st.pipeline = pipe;
+		st.to_process_in_draw = false;
+		st.cb_active = false;               // reset : otherwise the previous pipeline's state would be kept
 
 		// identify if the pipeline is to be processed
-		auto it = filtered_pipeline.find(pipelineHandle.handle);
-
-		if (g_shared_state->debug_log && flag_capture)
-		{
-			std::stringstream s;
-			s << "addon - bind_pipeline, search pipeline in filtered, handle= : " << std::hex << pipelineHandle.handle <<  "; ";
-			reshade::log::message(reshade::log::level::info, s.str().c_str());
-		}
+		auto it = filtered_pipeline.find(pipe.handle);
 
 		if (it == filtered_pipeline.end()) [[likely]]
 		{
@@ -482,84 +521,15 @@ extern "C" {
 			return;
 		}
 
-		{
-		
-			// substitute pipeline is shared by all "bind" definitions, so bind it only once
-			bool substituted = false;
-
-			for (Shader_Definition& def : it->second)
-			{
-				// def.hash = hash of the shader (VS, PS...) that matched the mod list
-				/*if ((def.action & action_replace_bind) && !substituted &&
-					def.substitute_pipeline.handle != 0)
-				{
-					commandList->bind_pipeline(stages, def.substitute_pipeline);
-					substituted = true;
-				}
-				*/
-				if (def.action & action_skip)
-				{
-					// def.hash tells you which shader triggered the skip
-					// handle def.draw_count here
-				}
-
-
 #if _DEBUG_LOGS  
-				log_shader_binded(pipelineHandle.handle, def);
+		log_shader_binded(pipe.handle, it->second.shader_definitions);
 #endif
 
+		st.to_process_in_draw = process_pipeline_hash_bind(st, it->second, commandList, stages, pipe);
 
+		// mod settings CB, pushed in on_draw*()
+		vrem_cb_prepare(st, pipe, it->second);
 
-				//log shader binded for usage in on_draw() and on_dispatch()
-				if ((stages & reshade::api::pipeline_stage::all_graphics) != 0)
-				{
-
-					//commandList->get_private_data<CmdData>().pipeline = pipelineHandle;
-					state.current_action = def.action;
-					state.current_feature = def.feature;
-				}
-			}
-
-
-			/*
-			// use shader
-			uint32_t action = shader.action;
-			auto& pipeline = shader.substitute_pipeline;
-
-			// setup variables regarding the action
-			if (it->second.action & action_log) process_action_log(it);
-
-			// inject texture
-			if (it->second.action & action_injectText)	process_action_injectText(commandList, it);
-
-			// replace pipelines during bind and inject CB for mod parameters
-			if (it->second.action & action_replace_bind || it->second.action & action_replace)
-				process_action_replace(commandList, stages, pipelineHandle, it);
-
-			// get texture 
-			if (it->second.action & action_get_text) process_action_get_text(it);
-
-			//dump texture (debug only)
-#ifdef _DEBUG
-			if ((it->second.action & action_dump) && flag_capture && g_shared_state->save_texture_flag) process_action_dump_text(it);
-			if ((it->second.action & action_dump) && flag_capture && g_shared_state->save_cb_flag) process_action_dump_CB(it);
-
-#endif
-			// setup flag for tracking render target for technique
-			if (it->second.action & action_track_RT) process_action_trackRT(it);
-
-			// setup flag for trendering technique
-			if (it->second.action & action_renderTechnique) process_action_renderTechnique(it);
-
-			// inject modified CB (modifed or restored version)
-			if (it->second.action & action_injectCB) process_action_injectCB(commandList, it);
-
-			// skp rendering by not drawing if the shader is to be skipped
-			if (it->second.action & action_skip) process_action_skip(it);
-			// trace current feature for next call
-			a_shared.current_feature = it->second.feature;
-			*/
-		}
 
 #if _DEBUG_CRASH 
 		reshade::log::message(reshade::log::level::info, "***** addon - vrem_on_bind_pipeline ended");

@@ -44,6 +44,7 @@
 
 // CB number to be injected in the shaders
 static const int CBINDEX = 13;
+static const int CBSPACE = 99;
 static const int CPERFRAME_INDEX = 6;
 
 // texture number to be injected in the shaders for depth/stencil
@@ -63,7 +64,7 @@ static const int VRGUI_sizeY = 1050;
 // Must be 32bit aligned
 struct ShaderInjectData {
 	float testFlag; //0.x
-	float rotorFlag; //0.y
+	float eye; //0.y
 	float testGlobal; //0.z
 	float disable_video_IHADSS; //0.w
 	float count_display; //1.x

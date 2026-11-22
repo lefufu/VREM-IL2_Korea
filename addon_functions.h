@@ -67,7 +67,8 @@ extern uint32_t calculateShaderHash(const reshade::api::shader_desc& desc);
 extern std::optional<Shader_Definition> is_in_mod_hash(uint32_t hash[], uint32_t subobject_count);
 extern std::optional<Shader_Definition> is_in_mod_hash(uint32_t hash);
 extern bool load_shader_code(std::unordered_map<uint32_t, std::vector<uint8_t>>& shader_cache, uint32_t hash, const wchar_t filename[]);
-extern reshade::api::pipeline clone_pipeline(reshade::api::device* device, reshade::api::pipeline_layout layout, uint32_t subobjectCount, const reshade::api::pipeline_subobject* subobjects, reshade::api::pipeline pipeline, uint32_t hash[]);
+//extern reshade::api::pipeline clone_pipeline(device* device, reshade::api::pipeline_layout layout, uint32_t subobjectCount, const reshade::api::pipeline_subobject* subobjects, reshade::api::pipeline pipeline, const uint32_t* hash, uint32_t hashCount);
+extern reshade::api::pipeline clone_pipeline(save_pipeline& sp, const uint32_t* hash, uint32_t hashCount);
 extern void save_pipeline_in_list(reshade::api::device* device, reshade::api::pipeline_layout layout, uint32_t subobject_count, const reshade::api::pipeline_subobject* subobjects, reshade::api::pipeline pipeline);
 extern save_pipeline* find__pipeline_per_handle(uint64_t handle);
 extern std::vector<save_pipeline*> find__pipelines_per_hash(uint32_t hash);
@@ -100,3 +101,13 @@ extern void pure_technique_vector();
 extern void read_textures(reshade::api::device* device);
 extern void delete_loaded_textures(reshade::api::device* device);
 extern void release_solid_replacement(reshade::api::device* device);
+extern bool process_pipeline_hash_bind(CmdData cmddata, FilteredPipelineData pipe_data, command_list* commandList, pipeline_stage stages, pipeline pipelineHandle);
+//extern void flush_settings();
+// extern void write_settings(const ShaderInjectData& src);
+extern void vrem_ensure_cb_buffer(device* dev);
+extern void vrem_destroy_cb_buffer(device* dev);
+extern void vrem_write_cb();
+extern void vrem_cb_prepare(CmdData& data, pipeline_layout layout, uint32_t action);
+extern void vrem_cb_push(command_list* cmd, shader_stage stage);
+
+

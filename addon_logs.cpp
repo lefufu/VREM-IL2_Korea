@@ -125,10 +125,10 @@ void log_filtered_added(uint64_t handle)
 		return;
 
 	std::stringstream s;
-	s << "addon - setup_filtered_pipelines, added filtered pipeline, handle = 0x" << std::hex << handle
-		<< std::dec << ", " << it->second.size() << " shader definition(s):";
+	s << "addon - setup_filtered_pipelines, added filtered pipeline, handle = " << std::hex << handle
+		<< std::dec << ", " << it->second.shader_definitions.size() << " shader definition(s):";
 
-	for (const Shader_Definition& def : it->second)
+	for (const Shader_Definition& def : it->second.shader_definitions)
 	{
 		s << "\n    hash = 0x" << std::hex << def.hash << std::dec
 			<< ", action = " << to_string(def.action)
@@ -207,7 +207,7 @@ void  log_pipeline_clone_OK(uint64_t orig_handle, uint64_t cloned_handle) {
 void  log_pipeline_clone_error(uint64_t orig_handle) {
 
 		std::stringstream s;
-		s << "ERROR : addon - error in cloning pipeline"
+		s << "addon - error in cloning pipeline"
 			<< ", orig pipeline: " << std::hex << orig_handle
 			<< ")";
 		reshade::log::message(reshade::log::level::error, s.str().c_str());
@@ -314,7 +314,7 @@ void log_pipeline_layout_mapping(reshade::api::pipeline_layout layout) {
 
 
 void log_saved_pipelines_value(save_pipeline saved_pipeline) {
-	if (g_shared_state->debug_log)
+	if (g_shared_state->debug_log > 1)
 	{
 		/*
 		//uint32_t hash;
@@ -415,11 +415,21 @@ void log_start_capture_frame() {
 	}
 }
 
-void log_shader_binded(uint64_t handle, Shader_Definition shader_def) {
+void log_shader_binded(uint64_t handle, std::vector<Shader_Definition> shader_def) {
 	if (g_shared_state->debug_log && flag_capture)
 	{
 		std::stringstream s;
-		s << "addon - bind_pipeline, shader binded : " << std::hex << handle << ", shader :" << to_string(shader_def) << "; ";
+		s << "addon - bind_pipeline, pipeline binded : handle  = " << std::hex << handle ;
+
+		for (const Shader_Definition& def : shader_def)
+		{
+			// utiliser def ici
+			s << "\n    hash = 0x" << std::hex << def.hash
+				<< ", action = " << to_string(def.action)
+				<< ", feature = " << to_string(def.feature)
+				<< ", filename = " << to_string(def.replace_filename)
+				<< ";";
+		}
 		reshade::log::message(reshade::log::level::info, s.str().c_str());
 	}
 }
@@ -1411,7 +1421,7 @@ void log_error_txt_handle_null(const std::string& filepath)
 void log_error_too_many_objectsl(reshade::api::pipeline pipeline, uint32_t subobject_count)
 {
 	std::stringstream s;
-	s << "addon - Error, pipeline not saved in list, pipeline handle =" << pipeline.handle << "subobject count = " << subobject_count << ";";
+	s << "addon - Error, pipeline not saved in list, pipeline handle =" << pipeline.handle << ", subobject count = " << subobject_count << "greater than allowed in MAX_PIPELINE_OBJECTS (" << MAX_PIPELINE_OBJECTS << ");";
 	reshade::log::message(reshade::log::level::error, s.str().c_str());
 }
 
@@ -1483,7 +1493,7 @@ void log_begin_effects()
 
 void log_on_create_pipeline(reshade::api::pipeline_layout layout, uint32_t subobject_count)
 {
-	if (g_shared_state->debug_log)
+	if (g_shared_state->debug_log > 1)
 	{
 		std::stringstream s;
 		s << "addon - vrem_on_create_pipeline, pipeline_layout =  " << std::hex << layout.handle << ", subobject_count = " << std::dec << subobject_count << ";";
@@ -1494,7 +1504,7 @@ void log_on_create_pipeline(reshade::api::pipeline_layout layout, uint32_t subob
 
 void log_on_create_pipeline_objects(uint32_t i, pipeline_subobject subobject, uint32_t hash)
 {
-	if (g_shared_state->debug_log)
+	if (g_shared_state->debug_log > 1)
 	{
 		std::stringstream s;
 		s << "   subobject[" << std::dec << i << "]type = " << to_string(subobject.type) << ", hash = " << std::hex << hash << "; ";
@@ -1505,7 +1515,7 @@ void log_on_create_pipeline_objects(uint32_t i, pipeline_subobject subobject, ui
 
 void log_init_command_list(command_list* cmd_list)
 {
-	if (g_shared_state->debug_log)
+	if (g_shared_state->debug_log > 1)
 	{
 		std::stringstream s;
 		s << "addon - init command list; ";
@@ -1729,5 +1739,48 @@ void log_bound_tables(reshade::api::device* dev, const CmdData& st)
 
 			binding += rg.count;
 		}
+	}
+}
+
+void log_error_shader_type(uint32_t shader_hash)
+
+{
+	if (g_shared_state->debug_log)
+	{
+
+		std::stringstream s;
+		s << "addon - on_create_pipeline : cso format (DXBC/DXIL) differs from original shader, "
+			<< "replacement skipped, hash = 0x" << std::hex << shader_hash;
+		reshade::log::message(reshade::log::level::warning, s.str().c_str());
+	}
+}	
+
+void log_init_device()
+{
+		if (g_shared_state->debug_log)
+	{
+		std::stringstream s;
+		s << "addon - init device: create resource for constant buffer;";
+		reshade::log::message(reshade::log::level::info, s.str().c_str());
+		}
+}
+
+void log_destroy_device()
+{
+	if (g_shared_state->debug_log)
+	{
+		std::stringstream s;
+		s << "addon - destroy device : delete resource for constant buffer; ";
+		reshade::log::message(reshade::log::level::info, s.str().c_str());
+	}
+}
+
+void log_on_create_pipeline_layout()
+{
+	if (g_shared_state->debug_log >1)
+	{
+		std::stringstream s;
+		s << "addon - create pipeline layout : update pipeline layout to add cb " << CBINDEX  << ";";
+		reshade::log::message(reshade::log::level::info, s.str().c_str());
 	}
 }

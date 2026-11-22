@@ -88,7 +88,7 @@ extern void log_delete_cloned_pipeline(uint64_t handle);
 extern void log_cleanup_shader_code();
 extern void log_end_capture_frame();
 extern void log_start_capture_frame();
-extern void log_shader_binded(uint64_t handle, Shader_Definition shader_def);
+extern void log_shader_binded(uint64_t handle, std::vector<Shader_Definition> shader_def);
 extern void log_pipeline_replaced(uint64_t pipelineHandle, uint64_t cloned);
 extern void log_init_pipeline_layout(const uint32_t paramCount, const pipeline_layout_param* params, reshade::api::pipeline_layout layout);
 extern void log_init_pipeline_params(const uint32_t paramCount, const pipeline_layout_param* params, reshade::api::pipeline_layout layout, uint32_t paramIndex, reshade::api::pipeline_layout_param param);
@@ -153,4 +153,8 @@ extern void log_update_descriptor_tables(device* device, uint32_t count, const d
 extern void log_copy_descriptor_tables(device* device, uint32_t count, const descriptor_table_copy* copies);
 extern void  log_reset_command_list(command_list* cmd_list);
 extern void log_bound_tables(device* dev, const CmdData& st);
+extern void log_error_shader_type(uint32_t shader_hash);
+extern void log_init_device();
+extern void log_destroy_device();
+extern void log_on_create_pipeline_layout();
 #endif

@@ -299,7 +299,7 @@ void save_pipeline_in_list(
             const auto& last_pipe = g_shared_state->VREM_pipelines.saved_pipelines.back();
 #if _DEBUG_LOGS
             // too verbose !
-            // log_saved_pipelines_value(last_pipe);
+            log_saved_pipelines_value(last_pipe);
 #endif
 
         }
