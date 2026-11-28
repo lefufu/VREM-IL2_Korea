@@ -117,7 +117,7 @@ void log_pipeline_init(PipeLine_Definition pipeline)
 
 void log_filtered_added(uint64_t handle)
 {
-	if (!g_shared_state->debug_log)
+	if (!g_shared_state->debug_log > 1)
 		return;
 
 	auto it = filtered_pipeline.find(handle);
@@ -191,7 +191,7 @@ void log_cloning_pipeline(reshade::api::pipeline pipeline, reshade::api::pipelin
 
 void  log_pipeline_clone_OK(uint64_t orig_handle, uint64_t cloned_handle) {
 
-	if (g_shared_state->debug_log)
+	if (g_shared_state->debug_log > 1)
 	{
 		std::stringstream s;
 		s << "addon - pipeline  cloned"
@@ -809,7 +809,8 @@ void log_reset_tracking()
 void log_ondraw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance, command_list* commandList)
 {
 	CmdData& state = commandList->get_private_data<CmdData>();
-	if ((g_shared_state->debug_log && flag_capture && (track_for_texture || a_shared.render_technique || g_shared_state->shader_hunter || state.current_action!=action_null)))
+	//if ((g_shared_state->debug_log && flag_capture && (track_for_texture || a_shared.render_technique || g_shared_state->shader_hunter || state.current_action!=action_null)))
+	if (g_shared_state->debug_log && flag_capture)
 	{
 
 		std::stringstream s;
@@ -817,7 +818,7 @@ void log_ondraw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_v
 		if (!g_shared_state->shader_hunter)
 		{
 			
-			s << "draw(" << vertex_count << ", " << instance_count << ", " << first_vertex << ", " << first_instance << ")";
+			s << "addon - draw(" << vertex_count << ", " << instance_count << ", " << first_vertex << ", " << first_instance << ")";
 			reshade::log::message(reshade::log::level::info, s.str().c_str());
 			s.str("");
 			s.clear();
@@ -831,19 +832,12 @@ void log_ondraw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_v
 			return;
 		};
 
-		s << "track_for_depthStencil=" << track_for_texture << ", do_not_draw =" << do_not_draw << ", a_shared.render_effect =" << a_shared.render_technique << "; ";
+		s << "state.flag_cb_dump = " << state.flag_cb_dump << ", state.flag_texture_dump =" << state.flag_texture_dump << ", state.to_process_in_draw = " << state.to_process_in_draw;
+		s << "\ntrack_for_depthStencil = " << track_for_texture << ", do_not_draw = " << do_not_draw << ", a_shared.render_effect = " << a_shared.render_technique << "; ";
+		s << "\nstate.current_handle = " << std::hex << state.current_handle << ", state.last_action = " << to_string(state.current_action) << ", state.current_feature = " << to_string(state.current_feature) << "; ";
 		reshade::log::message(reshade::log::level::info, s.str().c_str());
-		s.str("");
-		s.clear();
-
-		
-		s << "addon - ond_draw, state.current_handle = " << std::hex << state.current_handle << ", state.last_action = " << to_string(state.current_action) << ", state.current_feature = " << to_string(state.current_feature) << "; ";
-		reshade::log::message(reshade::log::level::info, s.str().c_str());
-		s.str("");
-		s.clear();
 
 
-		reshade::log::message(reshade::log::level::info, "Clear tracking flags");
 
 	}
 }
@@ -852,7 +846,8 @@ void log_on_draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t
 {
 	CmdData& state = commandList->get_private_data<CmdData>();
 
-	if ((g_shared_state->debug_log && flag_capture && (track_for_texture || a_shared.render_technique || g_shared_state->shader_hunter || state.current_action != action_null)))
+	//if ((g_shared_state->debug_log && flag_capture && (track_for_texture || a_shared.render_technique || g_shared_state->shader_hunter || state.current_action != action_null)))
+	if (g_shared_state->debug_log && flag_capture)
 	{
 		
 		std::stringstream s;
@@ -864,23 +859,17 @@ void log_on_draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t
 		} else
 		{
 			std::stringstream s;
-			s << "draw_indexed(" << index_count << ", " << instance_count << ", " << first_index << ", " << vertex_offset << ", " << first_instance << ")";
+			s << "addon - draw_indexed(" << index_count << ", " << instance_count << ", " << first_index << ", " << vertex_offset << ", " << first_instance << ")";
 			reshade::log::message(reshade::log::level::info, s.str().c_str());
 		}
 
 		if (g_shared_state->shader_hunter) return;
 
-		s << "track_for_depthStencil=" << track_for_texture << ", do_not_draw =" << do_not_draw << ", a_shared.render_effect =" << a_shared.render_technique << "; ";
+		s << "state.flag_cb_dump = " << state.flag_cb_dump << ", state.flag_texture_dump =" << state.flag_texture_dump << ", state.to_process_in_draw = " << state.to_process_in_draw;
+		s << "\ntrack_for_depthStencil = " << track_for_texture << ", do_not_draw = " << do_not_draw << ", a_shared.render_effect = " << a_shared.render_technique << "; ";
+		s << "\nstate.current_handle = " << std::hex << state.current_handle << ", state.last_action = " << to_string(state.current_action) << ", state.current_feature = " << to_string(state.current_feature) << "; ";
 		reshade::log::message(reshade::log::level::info, s.str().c_str());
-		s.str("");
-		s.clear();
 
-		s << "addon - ond_draw, state.current_handle = " << std::hex << state.current_handle << ", state.last_action = " << to_string(state.current_action) << ", state.current_feature = " << to_string(state.current_feature) << "; ";
-		reshade::log::message(reshade::log::level::info, s.str().c_str());
-		s.str("");
-		s.clear();
-
-		reshade::log::message(reshade::log::level::info, "Clear tracking flags");
 	}
 }
 
@@ -889,13 +878,14 @@ void log_on_drawOrDispatch_indirect(indirect_command type, resource buffer, uint
 	
 	CmdData& state = commandList->get_private_data<CmdData>();
 
-	if ((g_shared_state->debug_log && flag_capture && (track_for_texture || a_shared.render_technique || g_shared_state->shader_hunter || state.current_action != action_null)))
+	//if ((g_shared_state->debug_log && flag_capture && (track_for_texture || a_shared.render_technique || g_shared_state->shader_hunter || state.current_action != action_null)))
+	if (g_shared_state->debug_log && flag_capture) 
 	{
 		std::stringstream s;
 
 		if (!g_shared_state->shader_hunter)
 		{
-			s << "draw_indexed_indirect(" << (void*)buffer.handle << ", " << offset << ", " << draw_count << ", " << stride << ")";
+			s << "addon - draw_indexed_indirect(" << (void*)buffer.handle << ", " << offset << ", " << draw_count << ", " << stride << ")";
 			reshade::log::message(reshade::log::level::info, s.str().c_str());
 		}
 		else
@@ -905,17 +895,11 @@ void log_on_drawOrDispatch_indirect(indirect_command type, resource buffer, uint
 			return;
 		}
 
-		s << "track_for_depthStencil=" << track_for_texture << ", do_not_draw =" << do_not_draw << ", a_shared.render_effect =" << a_shared.render_technique << "; ";
+		s << "state.flag_cb_dump = " << state.flag_cb_dump << ", state.flag_texture_dump =" << state.flag_texture_dump << ", state.to_process_in_draw = " << state.to_process_in_draw;
+		s << "\ntrack_for_depthStencil = " << track_for_texture << ", do_not_draw = " << do_not_draw << ", a_shared.render_effect = " << a_shared.render_technique << "; ";
+		s << "\nstate.current_handle = " << std::hex << state.current_handle << ", state.last_action = " << to_string(state.current_action) << ", state.current_feature = " << to_string(state.current_feature) << "; ";
 		reshade::log::message(reshade::log::level::info, s.str().c_str());
-		s.str("");
-		s.clear();
 
-		s << "addon - ond_draw, state.current_handle = " << std::hex << state.current_handle << ", state.last_action = " << to_string(state.current_action) << ", state.current_feature = " << to_string(state.current_feature) << "; ";
-		reshade::log::message(reshade::log::level::info, s.str().c_str());
-		s.str("");
-		s.clear();
-
-		reshade::log::message(reshade::log::level::info, "Clear tracking flags");
 	}
 }
 
@@ -1782,5 +1766,15 @@ void log_on_create_pipeline_layout()
 		std::stringstream s;
 		s << "addon - create pipeline layout : update pipeline layout to add cb " << CBINDEX  << ";";
 		reshade::log::message(reshade::log::level::info, s.str().c_str());
+	}
+}
+
+void log_error_cb_prepare(uint64_t handle)
+{
+	if (g_shared_state->debug_log)
+	{
+		std::stringstream s;
+		s << "addon - on_bind_pipeline : pipeline " << std::hex << handle << " without CB layer;";
+		reshade::log::message(reshade::log::level::error, s.str().c_str());
 	}
 }

@@ -88,21 +88,9 @@ static void vrem_cb_push(command_list* cmd, shader_stage stage)
 }
 
 //*******************************************************************************************************
-// process action for the shader/pipeline if needed
-
-void process_actions(command_list* commandList)
-{
-	auto& state = commandList->get_private_data<CmdData>();	
-
-	vrem_cb_push(commandList, shader_stage::all_graphics);
-}
-
-
-
-//*******************************************************************************************************
 // clear tracking flags to avoid tracking resources if push_descriptor did not detect it...
 
-static void clear_tracking_flags()
+static void clear_tracking_flags(command_list* cmd)
 {
 
 	// if (a_shared.track_for_texture || a_shared.track_for_NS430 || a_shared.do_not_draw)
@@ -124,8 +112,9 @@ static void clear_tracking_flags()
 
 #ifdef _DEBUG
 	//to stop texture and buffer dump
-	a_shared.flag_texture_dump = false;
-	a_shared.flag_cb_dump = false;
+	auto& st = cmd->get_private_data<CmdData>();
+	// st.flag_texture_dump = false;
+	//st.flag_cb_dump = false;
 
 #endif
 
@@ -154,29 +143,26 @@ extern "C" {
 		reshade::log::message(reshade::log::level::info, "***** addon - vrem_on_draw started");
 #endif
 		CmdData& state = commandList->get_private_data<CmdData>();
+		if (!g_shared_state->shader_hunter && !state.flag_cb_dump && !state.flag_texture_dump && !state.to_process_in_draw) return false;
+		//if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !state.flag_texture_dump && !state.flag_cb_dump && !state.to_process_in_draw &&!g_shared_state->shader_hunter) return false;
+
+		
 #if _DEBUG_LOGS
 		// log
-		if (g_shared_state->shader_hunter && flag_capture) log_ondraw(vertex_count, instance_count, first_vertex, first_instance, commandList);
+		log_ondraw(vertex_count, instance_count, first_vertex, first_instance, commandList);
 
-#endif		
-		
-
-		if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !a_shared.flag_texture_dump && !a_shared.flag_cb_dump && !state.to_process_in_draw) return false;
-		process_actions(commandList);
-
-		bool skip = false;
-		if (state.do_not_draw) skip = true;
-#if _DEBUG_LOGS
-		// log
-		log_ondraw(vertex_count, instance_count, first_vertex,first_instance, commandList);
-#endif	
-		
 		// log bound tables
 		//too verbose
 		// log_bound_tables(dev, state);
-		
+#endif		
+
+		process_actions_draw(commandList);
+
+		bool skip = false;
+		if (state.do_not_draw) skip = true;
+
 		// clear tracking flags
-		clear_tracking_flags();
+		clear_tracking_flags(commandList);
 
 #if _DEBUG_CRASH 
 		reshade::log::message(reshade::log::level::info, "***** addon - vrem_on_draw ended");
@@ -188,52 +174,44 @@ extern "C" {
 	// On draw* : skip draw
 	VREM_EXPORT bool vrem_on_draw_indexed(command_list* commandList, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance)
 	{
+
 /*
 #ifdef _DEBUG
-		if (g_shared_state->save_rt_flag && flag_capture)
+		//dump render target if capture button is active, to help shader hunting and technique setup
+		if (g_shared_state->save_rt_flag && flag_capture && a_shared.track_for_render_target)
 		{
 			save_render_target(commandList);
 		}
 #endif
 */
-
 #if _DEBUG_CRASH 
 		reshade::log::message(reshade::log::level::info, "***** addon - vrem_on_draw_indexed started");
 #endif
 		CmdData& state = commandList->get_private_data<CmdData>();
+		if (!g_shared_state->shader_hunter && !state.flag_cb_dump && !state.flag_texture_dump && !state.to_process_in_draw) return false;
+
+		//if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !state.flag_texture_dump && !state.flag_cb_dump && !state.to_process_in_draw && !g_shared_state->shader_hunter) return false;
+
 
 #if _DEBUG_LOGS
 		// log
-		if (g_shared_state->shader_hunter && flag_capture) 
-			log_on_draw_indexed(index_count, instance_count, first_index, vertex_offset, first_instance, commandList);
+		log_on_draw_indexed(index_count, instance_count, first_index, vertex_offset, first_instance, commandList);
 
 		// log bound tables
 		reshade::api::device* dev = commandList->get_device();
-		auto& st = commandList->get_private_data<CmdData>();
 		//too verbose
 		// log_bound_tables(dev, st);
 
 #endif		
 
-		if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !a_shared.flag_texture_dump && !a_shared.flag_cb_dump && !state.to_process_in_draw) return false;
-		process_actions(commandList);
+
+		process_actions_draw(commandList);
 
 		bool skip = false;
 		if (state.do_not_draw) skip = true;
-
-#if _DEBUG_LOGS
-		// log
-		log_on_draw_indexed(index_count, instance_count, first_index, vertex_offset, first_instance, commandList);
-#endif
-		
-		// log bound tables
-		//too verbose
-		// log_bound_tables(dev, state);
-
-
 		 		
 		// clear trackign flags
-		clear_tracking_flags();
+		clear_tracking_flags(commandList);
 
 #if _DEBUG_CRASH 
 		reshade::log::message(reshade::log::level::info, "***** addon - vrem_on_draw_indexed ended");
@@ -253,27 +231,24 @@ extern "C" {
 		
 		
 		CmdData& state = commandList->get_private_data<CmdData>();
-#if _DEBUG_LOGS
-		// log
-		if (g_shared_state->shader_hunter && flag_capture) log_on_drawOrDispatch_indirect(type, buffer, offset, draw_count, stride, commandList);
-#endif
-		if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !a_shared.flag_texture_dump && !a_shared.flag_cb_dump && !state.to_process_in_draw) return false;
-		process_actions(commandList);
-		
-		bool skip = false;
-		if (state.do_not_draw) skip = true;
+		if (!g_shared_state->shader_hunter && !state.flag_cb_dump && !state.flag_texture_dump && !state.to_process_in_draw) return false;
 #if _DEBUG_LOGS
 		// log
 		log_on_drawOrDispatch_indirect(type, buffer, offset, draw_count, stride, commandList);
-
 		// log bound tables
 		//too verbose
 		// log_bound_tables(dev, state);
-
-		
 #endif
+
+		//if (!track_for_texture && !state.do_not_draw && !a_shared.render_technique && !state.flag_texture_dump && !state.flag_cb_dump && !state.to_process_in_draw) return false;
+
+		process_actions_draw(commandList);
+		
+		bool skip = false;
+		if (state.do_not_draw) skip = true;
+
 		// clear trackign flags
-		clear_tracking_flags();
+		clear_tracking_flags(commandList);
 
 #if _DEBUG_CRASH 
 		reshade::log::message(reshade::log::level::info, "***** addon - vrem_on_draw_indexed ended");

@@ -55,60 +55,6 @@
 
 using namespace reshade::api;
 
-
-//*******************************************************************************
-// update buffer with the current settings
-
-/*
-void write_settings(const ShaderInjectData& src)
-{
-	if (!g_ptr) return;
-	for (int eye = 0; eye < 2; ++eye) {
-		ShaderInjectData d = src;          // copie locale, on ne modifie pas la source
-		d.eye = float(eye);
-		memcpy(g_ptr + uint64_t(eye) * SLOT_SIZE, &d, sizeof(d));
-	}
-}
-*/
-
-/*void flush_settings()
-{
-	if (g_dirty.exchange(false)) write_settings();
-}
-*/
-
-//*******************************************************************************
-/*
-void vrem_create_cb_buffer(device* dev)
-{
-	if (g_ptr) return;
-
-	resource_desc desc(BUFFER_SIZE, memory_heap::cpu_to_gpu, resource_usage::constant_buffer);
-	if (!dev->create_resource(desc, nullptr, resource_usage::cpu_access, &g_buf)) {
-		reshade::log::message(reshade::log::level::info, "addon - create_cb_buffer : create_resource ECHEC; ");
-		return;
-	}
-
-	void* p = nullptr;
-	if (!dev->map_buffer_region(g_buf, 0, BUFFER_SIZE, map_access::write_only, &p) || !p) {
-		reshade::log::message(reshade::log::level::info, "addon - create_cb_buffer : map_buffer_region ECHEC; ");
-		dev->destroy_resource(g_buf);
-		g_buf = {};
-		return;
-	}
-	g_ptr = static_cast<uint8_t*>(p);
-
-	g_range[0] = { g_buf, 0,         SLOT_SIZE };
-	g_range[1] = { g_buf, SLOT_SIZE, SLOT_SIZE };
-
-	write_settings(a_shared.cb_inject_values);
-
-	std::stringstream s;
-	s << "addon - create_cb_buffer : OK g_buf=0x" << std::hex << g_buf.handle
-		<< " g_ptr=" << (void*)g_ptr << "; ";
-	reshade::log::message(reshade::log::level::info, s.str().c_str());
-}
-*/
 #ifdef _DEBUG
 extern "C" {
 #endif
@@ -118,8 +64,6 @@ extern "C" {
 #if _DEBUG_LOGS
 		log_init_device();
 #endif
-		// vrem_create_cb_buffer(dev);
-
 		vrem_ensure_cb_buffer(dev);
 
 		
@@ -140,16 +84,11 @@ extern "C" {
 #endif
 		
 		vrem_destroy_cb_buffer(dev);
-		/*
-		
-		if (g_buf.handle == 0) return;
-		dev->unmap_buffer_region(g_buf);
-		dev->destroy_resource(g_buf);
-		g_buf = {};
-		g_ptr = nullptr;
-		g_range[0] = {};
-		g_range[1] = {};
-		*/
+
+#ifdef _DEBUG
+		release_pending_exports(dev);
+#endif
+
 
 	}
 #ifdef _DEBUG

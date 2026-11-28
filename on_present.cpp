@@ -271,8 +271,7 @@ extern "C" {
             flag_capture = true;
             g_shared_state->loader_capture = true;
             frame_started = true;
-            a_shared.flag_texture_dump = false;
-            a_shared.flag_cb_dump = false;
+
 #if _DEBUG_LOGS
             log_start_capture_frame();
             log_shader_def_list();
@@ -288,15 +287,18 @@ extern "C" {
 		//force capture for testing
         // flag_capture = true;
 
-        
-        //update settings in CB8 (one setting per eye)
-
-		//a_shared.cb_inject_values.testFlag = 1.0;
-        a_shared.cb_inject_values.testFlag = a_shared.VREM_setting[SET_DEBUG];
 
         // write_settings(a_shared.cb_inject_values);
         vrem_write_cb();
         
+		
+#ifdef _DEBUG
+        // for dumping textures and constant buffers
+        flush_pending_exports(runtime);
+#endif
+
+		// temporary : to test the logic of uniform update when overlay is open
+        a_shared.cb_inject_values.testFlag = a_shared.VREM_setting[SET_DEBUG];
 
 #if _DEBUG_CRASH  
         reshade::log::message(reshade::log::level::info, "addon - vrem_on_reshade_present ending");

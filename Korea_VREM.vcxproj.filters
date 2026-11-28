@@ -108,7 +108,7 @@
     <ClCompile Include="on_bind_descriptor_table.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="process_pipeline_hash.cpp">
+    <ClCompile Include="process_actions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="on_init_device.cpp">
@@ -118,6 +118,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DX12_constant_buffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="dump_descriptors.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -137,10 +140,10 @@
     <ClInclude Include="addon_injection.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="export_texture.hpp">
+    <ClInclude Include="export_texture_DX12.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="export_CB.hpp">
+    <ClInclude Include="export_CB_DX12.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="addon_load_png.hpp">

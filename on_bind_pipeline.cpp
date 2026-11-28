@@ -57,381 +57,6 @@ using namespace reshade::api;
 
 static uint32_t last_pipeline_hash_PS = 0;
 
-
-//*******************************************************************************
-// setup variables regarding the action
-
-void process_action_log(std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-
-	// PS for GUI : set flag
-	if (it->second.feature == Feature::GUI)
-	{
-		a_shared.cb_inject_values.GUItodraw = 1.0;
-
-		// log infos
-#if _DEBUG_LOGS  
-		log_start_monitor("GUItodraw");
-#endif
-	}
-
-	// PS for mirror view : setup VR mode
-	if (it->second.feature == Feature::VRMode)
-	{
-		a_shared.cb_inject_values.VRMode = 1.0;
-		//for technique control
-		g_shared_state->is_VR = true;
-		// identify which view was used before mirror view
-		// defaut
-		a_shared.mirror_VR = 0;
-		// secure only 1 and 2 view processed
-		if (a_shared.count_display == 1) a_shared.mirror_VR = 0;
-		if (a_shared.count_display == 2) a_shared.mirror_VR = 1;
-#if _DEBUG_LOGS  
-		log_mirror_view();
-#endif
-	}
-
-	if (it->second.feature == Feature::mapMode)
-	{
-		a_shared.cb_inject_values.mapMode = 0.0;
-	}
-
-
-	if (it->second.feature == Feature::VS_global2)
-	{
-		// handle the case where the Ps is called 2 time consecutivelly because of mirror view
-		if (a_shared.last_feature != Feature::Global && !a_shared.cb_inject_values.mapMode)
-		{
-
-			// if texure has been copied previously, increase draw count, otherwise do nothing, to avoid counting shader calls for MFD rendering
-			// if (a_shared.depthStencil_copy_started)
-			{
-
-				a_shared.count_display += 1;
-				// log max of count_display to enable or not features for VR / Quad view
-				a_shared.count_draw = max(a_shared.count_draw, a_shared.count_display);
-				// it's stupid but I'm too lazy to change code now..
-				a_shared.cb_inject_values.count_display = a_shared.count_display;
-
-			}
-			/* else
-			{
-				// log infos
-				log_not_increase_draw_count();
-			} */
-		}
-
-		// set up draw flag to avoid push_constant() doing effect before draw (it will be overwritten by the PS)
-		a_shared.draw_passed = false;
-
-	}	
-
-	// tempo to authorize fist launch of techniques
-	if (a_shared.wait_for_technique <= FRAME_BEFORE_TECHNIQUE)
-		a_shared.wait_for_technique = a_shared.wait_for_technique + 1;
-}
-
-//*******************************************************************************
-// inject texture 
-void process_action_injectText(command_list* commandList, std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-	// inject texture using push_descriptor() if things has been initialized 
-	if ((it->second.feature == Feature::Global || it->second.feature == Feature::Label) && a_shared.count_display >= 0)
-	{
-		// inject mask and depth texture
-		// check if the current depthStencil is declared
-		auto it_ds = a_shared.copied_textures.find(current_DepthStencil_handle);
-		if (it_ds != a_shared.copied_textures.end())
-		{
-			// stencil depth textures in shaders for color change and label masking 
-			// if ((it->second.feature == Feature::Global || it->second.feature == Feature::Label) && a_shared.count_display >= 0 && a_shared.copied_textures[current_DepthStencil_handle].copied)
-			if ( a_shared.copied_textures[current_DepthStencil_handle].copied)
-			{
-				reshade::api::descriptor_table_update update;
-
-				if (a_shared.cb_inject_values.AAMode == 1.0)
-				{
-					//inject depth texture in t3 and t4 for MSAA0X
-					inject_texture(commandList, 3, current_DepthStencil_handle, "Depth and stencil MSAA0x");
-				}
-				else if (a_shared.cb_inject_values.AAMode == 2.0)
-				{
-					//inject depth texture in t5 and t6  for MSAA2X
-					inject_texture(commandList, 5, current_DepthStencil_handle, "Depth and stencil MSAA2x");
-				}
-				else if (a_shared.cb_inject_values.AAMode == 4.0)
-				{
-					//inject depth texture in t7 and t8  for MSAA4X
-					inject_texture(commandList, 7, current_DepthStencil_handle, "Depth and stencil MSAA4x");
-				}
-			}
-		}
-
-	}
-
-}
-//*******************************************************************************
-// replace shader if needed and inject CB for mod parameters
-/*
-void process_action_replace(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle, std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-	// TODO : add optimization to avoid pushing CB13 if not needed
-	{
-		// use push constant() to push the mod parameter in CB13,a sit is assumed a replaced shader will need mod parameters
-		// pipeline_layout for CB initialized in init_pipeline() once for all
-
-		commandList->push_constants(
-			shader_stage::all,
-			a_shared.saved_pipeline_layout_CB[SETTINGS_CB_NB],
-			0,
-			0,
-			CBSIZE,
-			&a_shared.cb_inject_values
-		);
-#if _DEBUG_LOGS  
-		log_CB_injected("VREM CB");
-#endif
-	}
-	//if (it->second.action & action_replace_bind || ((it->second.action & action_replace) && g_shared_state->debug))
-	if (it->second.action & action_replace_bind )
-	{
-		// shader is to be replaced by the new one created in on_Init_Pipeline
-		commandList->bind_pipeline(stages, it->second.substitute_pipeline);
-		// log infos
-#if _DEBUG_LOGS  
-		log_pipeline_replaced(pipelineHandle.handle, it->second.substitute_pipeline.handle);
-#endif
-	}
-}
-*/
-
-//*******************************************************************************
-// setup flags to get texture
-void process_action_get_text(std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-	// track stencil and depth
-	if (it->second.feature == Feature::GetStencil && !a_shared.not_track_mask_anymore)
-	{
-		//set flag to get mask texture at next push_descriptors
-		track_for_texture = true;
-
-#if _DEBUG_LOGS  
-		// log infos
-		log_start_monitor("ego plane mask");
-#endif
-
-	}
-
-	// track NS430
-	if (it->second.feature == Feature::NS430 && a_shared.cb_inject_values.NS430Flag)
-	{
-		//set flag to get mask texture at next push_descriptors
-		track_for_texture = true;
-
-#if _DEBUG_LOGS  
-		// log infos
-		log_start_monitor("NS430");
-#endif
-
-	}
-	a_shared.last_feature = it->second.feature;
-}
-
-//*******************************************************************************
-// setup flags to dump  textures
-void process_action_dump_text(std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-	if (!a_shared.not_track_mask_anymore)
-	{
-		//set flag to get mask texture at next push_descriptors
-		track_for_texture = true;
-
-#if _DEBUG_LOGS  
-		// log infos
-		log_start_monitor("Request text. dump");
-#endif
-		//dump textures at next push_descriptors
-		a_shared.flag_texture_dump = true;
-		a_shared.ps_hash_for_text_dump = 0x0;
-	}
-}
-
-//*******************************************************************************
-// setup flags to dump  CB
-void process_action_dump_CB(std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-	if (!a_shared.not_track_mask_anymore)
-	{
-		//set flag to get mask texture at next push_descriptors
-		track_for_texture = true;
-
-#if _DEBUG_LOGS  
-		// log infos
-		log_start_monitor("Request CB. dump");
-#endif
-		//dump textures at next push_descriptors
-		a_shared.flag_cb_dump = true;
-		a_shared.ps_hash_for_cb_dump = 0x0;
-	}
-}
-
-//*******************************************************************************
-// setup flags to render technique
-void process_action_trackRT(std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-	
-	//handle different config between VR and 2D
-	//if ( it->second.feature == Feature::GlobalVS1 )
-	
-	// if ((a_shared.VREM_setting[SET_TECHNIQUE] && g_shared_state->technique_enabled && !g_shared_state->technique_vector.empty()) || (a_shared.VREM_setting[SET_MISC] && a_shared.cb_inject_values.maskLabels)  )
-	if (settings_for_render_target())
-	{
-		a_shared.track_for_render_target = true;
-#if _DEBUG_LOGS  
-		// log infos
-		log_start_monitor("Render target");
-#endif
-	}
-}
-
-//*******************************************************************************
-// setup flags skip draw
-void process_action_skip(std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-	if (it->second.feature == Feature::NS430 && a_shared.cb_inject_values.NS430Flag)
-	{
-		//set flag to get mask texture at next push_descriptors
-		do_not_draw = true;
-
-#if _DEBUG_LOGS  
-		// log infos
-		log_start_monitor("ego plane mask");
-#endif
-
-	}
-}
-//*******************************************************************************								 
-// setup flags to render technique
-void process_action_renderTechnique(std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-	if (g_shared_state->technique_enabled && !g_shared_state->technique_vector.empty())
-	{
-		//handle different shader for VR and 2D
-		if ((!a_shared.cb_inject_values.VRMode && it->second.feature == Feature::VS_global2 && a_shared.VREM_setting[SET_TECHNIQUE]) || (a_shared.cb_inject_values.VRMode && it->second.feature == Feature::VS_global1) || (a_shared.cb_inject_values.VRMode && it->second.feature == Feature::VS_global1_MSAA))
-		{
-			a_shared.track_for_render_target = false;
-			if (g_shared_state->debug_log && flag_capture)
-			{
-				std::stringstream s;
-				s << "**** a_shared.track_for_render_target =  false !!! ***";
-				reshade::log::message(reshade::log::level::error, s.str().c_str());
-			}
-
-			a_shared.render_technique = true;
-#if _DEBUG_LOGS  
-			// log infos
-			log_start_monitor("end of traking Render target, request technique rendering");
-#endif
-		}
-	}
-}
-
-
-//*******************************************************************************
-// inject modified CB (not used in IL2 yet, keep only for future DCS VREM2 mod)
-void process_action_injectCB(command_list* commandList, std::unordered_map<uint64_t, Shader_Definition>::iterator it)
-{
-	// inject constant buffer other than the one containing VREM setting
-	
-	//CPERFRAME/haze for global illumination :  need to modify value for haze but set orgi. value for reflection
-	if (it->second.feature == Feature::GetStencil && a_shared.CB_copied[CPERFRAME_CB_NB] && a_shared.VREM_setting[SET_MISC])
-	{
-
-		//modify value for Haze
-		a_shared.dest_CB_array[CPERFRAME_CB_NB][FOG_INDEX] = a_shared.orig_values[CPERFRAME_CB_NB][GATMINTENSITY_SAVE] * a_shared.cb_inject_values.hazeReduction;
-		// other value
-		a_shared.dest_CB_array[CPERFRAME_CB_NB][GCOCKPITIBL_INDEX_X] = a_shared.orig_values[CPERFRAME_CB_NB][GCOCKPITIBL_X_SAVE];
-		a_shared.dest_CB_array[CPERFRAME_CB_NB][GCOCKPITIBL_INDEX_Y] = a_shared.orig_values[CPERFRAME_CB_NB][GCOCKPITIBL_Y_SAVE];
-		// use push constant() to push CPerFrame 
-		// pipeline_layout for CB initialized in init_pipeline() once for all
-		commandList->push_constants(
-			shader_stage::all,
-			a_shared.saved_pipeline_layout_CB[CPERFRAME_CB_NB],
-			0,
-			0, // can not injecting only the haze value to be updated (so first = FOG_INDEX) because it is making the game crash...
-			CPERFRAME_SIZE,
-			&a_shared.dest_CB_array[CPERFRAME_CB_NB]
-		);
-#if _DEBUG_LOGS  
-		log_CB_injected("CPerFrame updated for fog, GCOCKPITIBL default");
-#endif
-
-		// last_replaced_shader = pipelineHandle.handle;
-		a_shared.last_feature = it->second.feature;
-
-	}
-
-	//CPERFRAME/haze for other shaders :  need to keep orig. value
-	// if (it->second.feature == Feature::VS_Sky && a_shared.CB_copied[CPERFRAME_CB_NB] && a_shared.VREM_setting[SET_MISC])
-	if ((it->second.feature == Feature::mapMode || it->second.feature == Feature::VS_Sky) && a_shared.CB_copied[CPERFRAME_CB_NB] && a_shared.VREM_setting[SET_MISC])
-	{
-
-		//modify value for Haze
-		a_shared.dest_CB_array[CPERFRAME_CB_NB][FOG_INDEX] = a_shared.orig_values[CPERFRAME_CB_NB][GATMINTENSITY_SAVE];
-		//other value
-		a_shared.dest_CB_array[CPERFRAME_CB_NB][GCOCKPITIBL_INDEX_X] = a_shared.orig_values[CPERFRAME_CB_NB][GCOCKPITIBL_X_SAVE];
-		a_shared.dest_CB_array[CPERFRAME_CB_NB][GCOCKPITIBL_INDEX_Y] = a_shared.orig_values[CPERFRAME_CB_NB][GCOCKPITIBL_Y_SAVE];
-
-		// use push constant() to push CPerFrame 
-		// pipeline_layout for CB initialized in init_pipeline() once for all
-		commandList->push_constants(
-			shader_stage::all,
-			a_shared.saved_pipeline_layout_CB[CPERFRAME_CB_NB],
-			0,
-			0,
-			CPERFRAME_SIZE,
-			&a_shared.dest_CB_array[CPERFRAME_CB_NB]
-		);
-#if _DEBUG_LOGS  
-		log_CB_injected("CPerFrame original");
-#endif
-
-		// last_replaced_shader = pipelineHandle.handle;
-		a_shared.last_feature = it->second.feature;
-
-	}
-	
-	//CPERFRAME/reflect for instrument
-	if (it->second.feature == Feature::NoReflect && a_shared.CB_copied[CPERFRAME_CB_NB])
-	{
-
-		//modify value
-		a_shared.dest_CB_array[CPERFRAME_CB_NB][GCOCKPITIBL_INDEX_X] = a_shared.orig_values[CPERFRAME_CB_NB][GCOCKPITIBL_X_SAVE] * a_shared.cb_inject_values.gCockpitIBL;
-		a_shared.dest_CB_array[CPERFRAME_CB_NB][GCOCKPITIBL_INDEX_Y] = a_shared.orig_values[CPERFRAME_CB_NB][GCOCKPITIBL_Y_SAVE] * a_shared.cb_inject_values.gCockpitIBL;
-
-		// use push constant() to push CPerFrame 
-		// pipeline_layout for CB initialized in init_pipeline() once for all
-		commandList->push_constants(
-			shader_stage::all,
-			a_shared.saved_pipeline_layout_CB[CPERFRAME_CB_NB],
-			0,
-			0,
-			CPERFRAME_SIZE,
-			&a_shared.dest_CB_array[CPERFRAME_CB_NB]
-		);
-#if _DEBUG_LOGS  
-		log_CB_injected("CPerFrame for GCOCKPITIBL");
-#endif
-
-		// last_replaced_shader = pipelineHandle.handle;
-		a_shared.last_feature = it->second.feature;
-	}
-	
-}
-
-
-
 //*******************************************************************************
 // prepare the push of the mod settings CB : done at bind, executed before the draw
 static void vrem_cb_prepare(CmdData& st, const pipeline& pipe, const FilteredPipelineData& data)
@@ -451,9 +76,8 @@ static void vrem_cb_prepare(CmdData& st, const pipeline& pipe, const FilteredPip
 	{
 		static int n = 0;
 		if (n++ < 5) {
-			std::stringstream s;
-			s << "addon - bind_pipeline : pipe=0x" << std::hex << pipe.handle << " sans layout CB; ";
-			reshade::log::message(reshade::log::level::info, s.str().c_str());
+			log_error_cb_prepare(pipe.handle);
+
 		}
 		return;
 	}
@@ -464,13 +88,6 @@ static void vrem_cb_prepare(CmdData& st, const pipeline& pipe, const FilteredPip
 	st.cb_index = li->second;
 	st.cb_active = true;
 
-	static int n2 = 0;
-	if (n2++ < 5) {
-		std::stringstream s;
-		s << "addon - bind_pipeline : pipe=0x" << std::hex << pipe.handle << " layout=0x" << pl->second
-			<< std::dec << " param_index=" << li->second << " ACTIF; ";
-		reshade::log::message(reshade::log::level::info, s.str().c_str());
-	}
 }
 
 
@@ -483,8 +100,7 @@ extern "C" {
 	VREM_EXPORT void vrem_on_bind_pipeline(command_list* commandList, pipeline_stage stages, pipeline pipe)
 	{
 
-		// optimize performance by reducing processing to ALLOWED_STAGES
-		// if ((static_cast<uint32_t>(stages) & static_cast<uint32_t>(ALLOWED_STAGES)) == 0) return;
+
 #if _DEBUG_CRASH 
 		reshade::log::message(reshade::log::level::info, "***** addon - vrem_on_bind_pipeline started");
 #endif
@@ -509,6 +125,8 @@ extern "C" {
 		st.pipeline = pipe;
 		st.to_process_in_draw = false;
 		st.cb_active = false;               // reset : otherwise the previous pipeline's state would be kept
+		st.flag_cb_dump = false;             // reset : otherwise the previous pipeline's state would be kept
+		st.flag_texture_dump = false;             // reset : otherwise the previous pipeline's state would be kept
 
 		// identify if the pipeline is to be processed
 		auto it = filtered_pipeline.find(pipe.handle);
@@ -525,7 +143,7 @@ extern "C" {
 		log_shader_binded(pipe.handle, it->second.shader_definitions);
 #endif
 
-		st.to_process_in_draw = process_pipeline_hash_bind(st, it->second, commandList, stages, pipe);
+		st.to_process_in_draw = process_action_bind(st, it->second, commandList, stages, pipe);
 
 		// mod settings CB, pushed in on_draw*()
 		vrem_cb_prepare(st, pipe, it->second);

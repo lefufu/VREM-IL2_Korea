@@ -101,7 +101,7 @@ extern void pure_technique_vector();
 extern void read_textures(reshade::api::device* device);
 extern void delete_loaded_textures(reshade::api::device* device);
 extern void release_solid_replacement(reshade::api::device* device);
-extern bool process_pipeline_hash_bind(CmdData cmddata, FilteredPipelineData pipe_data, command_list* commandList, pipeline_stage stages, pipeline pipelineHandle);
+extern bool process_action_bind(CmdData cmddata, FilteredPipelineData pipe_data, command_list* commandList, pipeline_stage stages, pipeline pipelineHandle);
 //extern void flush_settings();
 // extern void write_settings(const ShaderInjectData& src);
 extern void vrem_ensure_cb_buffer(device* dev);
@@ -109,5 +109,13 @@ extern void vrem_destroy_cb_buffer(device* dev);
 extern void vrem_write_cb();
 extern void vrem_cb_prepare(CmdData& data, pipeline_layout layout, uint32_t action);
 extern void vrem_cb_push(command_list* cmd, shader_stage stage);
+extern void process_actions_draw(command_list* commandList);
+
+#ifdef _DEBUG
+extern void dump_bound_descriptors(reshade::api::command_list* cmd);
+extern void flush_pending_exports(reshade::api::effect_runtime* runtime);
+extern void release_pending_exports(reshade::api::device* dev);
+extern void track_root_descriptors(reshade::api::command_list* cmd, reshade::api::pipeline_layout layout,uint32_t param_index, const reshade::api::descriptor_table_update& update);
+#endif
 
 

@@ -60,6 +60,8 @@
 #include "crc32_hash.hpp"
 #include <vector>
 #include <filesystem>
+#include <cstring>
+#include <utility>
 
 #include "stb_image_write.h"
 #include "addon_objects.h"
@@ -194,6 +196,299 @@ static float unpack_f10(uint32_t bits)
 	float result;
 	std::memcpy(&result, &f32, sizeof(result));
 	return result;
+}
+
+// ------------------------------------------------------------------------------------------------
+// BC7 decoding
+// See https://docs.microsoft.com/windows/win32/direct3d11/bc7-format-mode-reference
+// ------------------------------------------------------------------------------------------------
+
+// Partition tables: subset index of each of the 16 texels, for 2 subsets and 3 subsets (64 partitions each)
+static const uint8_t bc7_partition_table[2][64][16] =
+{
+	{ // 2 subsets
+		{0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1}, {0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1},
+		{0,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1}, {0,0,0,1,0,0,1,1,0,0,1,1,0,1,1,1},
+		{0,0,0,0,0,0,0,1,0,0,0,1,0,0,1,1}, {0,0,1,1,0,1,1,1,0,1,1,1,1,1,1,1},
+		{0,0,0,1,0,0,1,1,0,1,1,1,1,1,1,1}, {0,0,0,0,0,0,0,1,0,0,1,1,0,1,1,1},
+		{0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1}, {0,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1},
+		{0,0,0,0,0,0,0,1,0,1,1,1,1,1,1,1}, {0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,1},
+		{0,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1}, {0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1},
+		{0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1}, {0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1},
+		{0,0,0,0,1,0,0,0,1,1,1,0,1,1,1,1}, {0,1,1,1,0,0,0,1,0,0,0,0,0,0,0,0},
+		{0,0,0,0,0,0,0,0,1,0,0,0,1,1,1,0}, {0,1,1,1,0,0,1,1,0,0,0,1,0,0,0,0},
+		{0,0,1,1,0,0,0,1,0,0,0,0,0,0,0,0}, {0,0,0,0,1,0,0,0,1,1,0,0,1,1,1,0},
+		{0,0,0,0,0,0,0,0,1,0,0,0,1,1,0,0}, {0,1,1,1,0,0,1,1,0,0,1,1,0,0,0,1},
+		{0,0,1,1,0,0,0,1,0,0,0,1,0,0,0,0}, {0,0,0,0,1,0,0,0,1,0,0,0,1,1,0,0},
+		{0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0}, {0,0,1,1,0,1,1,0,0,1,1,0,1,1,0,0},
+		{0,0,0,1,0,1,1,1,1,1,1,0,1,0,0,0}, {0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0},
+		{0,1,1,1,0,0,0,1,1,0,0,0,1,1,1,0}, {0,0,1,1,1,0,0,1,1,0,0,1,1,1,0,0},
+		{0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1}, {0,0,0,0,1,1,1,1,0,0,0,0,1,1,1,1},
+		{0,1,0,1,1,0,1,0,0,1,0,1,1,0,1,0}, {0,0,1,1,0,0,1,1,1,1,0,0,1,1,0,0},
+		{0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0}, {0,1,0,1,0,1,0,1,1,0,1,0,1,0,1,0},
+		{0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,1}, {0,1,0,1,1,0,1,0,1,0,1,0,0,1,0,1},
+		{0,1,1,1,0,0,1,1,1,1,0,0,1,1,1,0}, {0,0,0,1,0,0,1,1,1,1,0,0,1,0,0,0},
+		{0,0,1,1,0,0,1,0,0,1,0,0,1,1,0,0}, {0,0,1,1,1,0,1,1,1,1,0,1,1,1,0,0},
+		{0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0}, {0,0,1,1,1,1,0,0,1,1,0,0,0,0,1,1},
+		{0,1,1,0,0,1,1,0,1,0,0,1,1,0,0,1}, {0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0},
+		{0,1,0,0,1,1,1,0,0,1,0,0,0,0,0,0}, {0,0,1,0,0,1,1,1,0,0,1,0,0,0,0,0},
+		{0,0,0,0,0,0,1,0,0,1,1,1,0,0,1,0}, {0,0,0,0,0,1,0,0,1,1,1,0,0,1,0,0},
+		{0,1,1,0,1,1,0,0,1,0,0,1,0,0,1,1}, {0,0,1,1,0,1,1,0,1,1,0,0,1,0,0,1},
+		{0,1,1,0,0,0,1,1,1,0,0,1,1,1,0,0}, {0,0,1,1,1,0,0,1,1,1,0,0,0,1,1,0},
+		{0,1,1,0,1,1,0,0,1,1,0,0,1,0,0,1}, {0,1,1,0,0,0,1,1,0,0,1,1,1,0,0,1},
+		{0,1,1,1,1,1,1,0,1,0,0,0,0,0,0,1}, {0,0,0,1,1,0,0,0,1,1,1,0,0,1,1,1},
+		{0,0,0,0,1,1,1,1,0,0,1,1,0,0,1,1}, {0,0,1,1,0,0,1,1,1,1,1,1,0,0,0,0},
+		{0,0,1,0,0,0,1,0,1,1,1,0,1,1,1,0}, {0,1,0,0,0,1,0,0,0,1,1,1,0,1,1,1}
+	},
+	{ // 3 subsets
+		{0,0,1,1,0,0,1,1,0,2,2,1,2,2,2,2}, {0,0,0,1,0,0,1,1,2,2,1,1,2,2,2,1},
+		{0,0,0,0,2,0,0,1,2,2,1,1,2,2,1,1}, {0,2,2,2,0,0,2,2,0,0,1,1,0,1,1,1},
+		{0,0,0,0,0,0,0,0,1,1,2,2,1,1,2,2}, {0,0,1,1,0,0,1,1,0,0,2,2,0,0,2,2},
+		{0,0,2,2,0,0,2,2,1,1,1,1,1,1,1,1}, {0,0,1,1,0,0,1,1,2,2,1,1,2,2,1,1},
+		{0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2}, {0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2},
+		{0,0,0,0,1,1,1,1,2,2,2,2,2,2,2,2}, {0,0,1,2,0,0,1,2,0,0,1,2,0,0,1,2},
+		{0,1,1,2,0,1,1,2,0,1,1,2,0,1,1,2}, {0,1,2,2,0,1,2,2,0,1,2,2,0,1,2,2},
+		{0,0,1,1,0,1,1,2,1,1,2,2,1,2,2,2}, {0,0,1,1,2,0,0,1,2,2,0,0,2,2,2,0},
+		{0,0,0,1,0,0,1,1,0,1,1,2,1,1,2,2}, {0,1,1,1,0,0,1,1,2,0,0,1,2,2,0,0},
+		{0,0,0,0,1,1,2,2,1,1,2,2,1,1,2,2}, {0,0,2,2,0,0,2,2,0,0,2,2,1,1,1,1},
+		{0,1,1,1,0,1,1,1,0,2,2,2,0,2,2,2}, {0,0,0,1,0,0,0,1,2,2,2,1,2,2,2,1},
+		{0,0,0,0,0,0,1,1,0,1,2,2,0,1,2,2}, {0,0,0,0,1,1,0,0,2,2,1,0,2,2,1,0},
+		{0,1,2,2,0,1,2,2,0,0,1,1,0,0,0,0}, {0,0,1,2,0,0,1,2,1,1,2,2,2,2,2,2},
+		{0,1,1,0,1,2,2,1,1,2,2,1,0,1,1,0}, {0,0,0,0,0,1,1,0,1,2,2,1,1,2,2,1},
+		{0,0,2,2,1,1,0,2,1,1,0,2,0,0,2,2}, {0,1,1,0,0,1,1,0,2,0,0,2,2,2,2,2},
+		{0,0,1,1,0,1,2,2,0,1,2,2,0,0,1,1}, {0,0,0,0,2,0,0,0,2,2,1,1,2,2,2,1},
+		{0,0,0,0,0,0,0,2,1,1,2,2,1,2,2,2}, {0,2,2,2,0,0,2,2,0,0,1,2,0,0,1,1},
+		{0,0,1,1,0,0,1,2,0,0,2,2,0,2,2,2}, {0,1,2,0,0,1,2,0,0,1,2,0,0,1,2,0},
+		{0,0,0,0,1,1,1,1,2,2,2,2,0,0,0,0}, {0,1,2,0,1,2,0,1,2,0,1,2,0,1,2,0},
+		{0,1,2,0,2,0,1,2,1,2,0,1,0,1,2,0}, {0,0,1,1,2,2,0,0,1,1,2,2,0,0,1,1},
+		{0,0,1,1,1,1,2,2,2,2,0,0,0,0,1,1}, {0,1,0,1,0,1,0,1,2,2,2,2,2,2,2,2},
+		{0,0,0,0,0,0,0,0,2,1,2,1,2,1,2,1}, {0,0,2,2,1,1,2,2,0,0,2,2,1,1,2,2},
+		{0,0,2,2,0,0,1,1,0,0,2,2,0,0,1,1}, {0,2,2,0,1,2,2,1,0,2,2,0,1,2,2,1},
+		{0,1,0,1,2,2,2,2,2,2,2,2,0,1,0,1}, {0,0,0,0,2,1,2,1,2,1,2,1,2,1,2,1},
+		{0,1,0,1,0,1,0,1,0,1,0,1,2,2,2,2}, {0,2,2,2,0,1,1,1,0,2,2,2,0,1,1,1},
+		{0,0,0,2,1,1,1,2,0,0,0,2,1,1,1,2}, {0,0,0,0,2,1,1,2,2,1,1,2,2,1,1,2},
+		{0,2,2,2,0,1,1,1,0,1,1,1,0,2,2,2}, {0,0,0,2,1,1,1,2,1,1,1,2,0,0,0,2},
+		{0,1,1,0,0,1,1,0,0,1,1,0,2,2,2,2}, {0,0,0,0,0,0,0,0,2,1,1,2,2,1,1,2},
+		{0,1,1,0,0,1,1,0,2,2,2,2,2,2,2,2}, {0,0,2,2,0,0,1,1,0,0,1,1,0,0,2,2},
+		{0,0,2,2,1,1,2,2,1,1,2,2,0,0,2,2}, {0,0,0,0,0,0,0,0,0,0,0,0,2,1,1,2},
+		{0,0,0,2,0,0,0,1,0,0,0,2,0,0,0,1}, {0,2,2,2,1,2,2,2,0,2,2,2,1,2,2,2},
+		{0,1,0,1,2,2,2,2,2,2,2,2,2,2,2,2}, {0,1,1,1,2,0,1,1,2,2,0,1,2,2,2,0}
+	}
+};
+
+// Index of the "anchor" texel (whose index has an implicit MSB of 0) for the 2nd subset of 2-subset partitions
+static const uint8_t bc7_anchor_index_2_subsets[64] =
+{
+	15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+	15, 2, 8, 2, 2, 8, 8,15, 2, 8, 2, 2, 8, 8, 2, 2,
+	15,15, 6, 8, 2, 8,15,15, 2, 8, 2, 2, 2,15,15, 6,
+	 6, 2, 6, 8,15,15, 2, 2,15,15,15,15,15, 2, 2,15
+};
+// Index of the anchor texel for the 2nd and 3rd subsets of 3-subset partitions
+static const uint8_t bc7_anchor_index_3_subsets_2[64] =
+{
+	 3, 3,15,15, 8, 3,15,15, 8, 8, 6, 6, 6, 5, 3, 3,
+	 3, 3, 8,15, 3, 3, 6,10, 5, 8, 8, 6, 8, 5,15,15,
+	 8,15, 3, 5, 6,10, 8,15,15, 3,15, 5,15,15,15,15,
+	 3,15, 5, 5, 5, 8, 5,10, 5,10, 8,13,15,12, 3, 3
+};
+static const uint8_t bc7_anchor_index_3_subsets_3[64] =
+{
+	15, 8, 8, 3,15,15, 3, 8,15,15,15,15,15,15,15, 8,
+	15, 8,15, 3,15, 8,15, 8, 3,15, 6,10,15,15,10, 8,
+	15, 3,15,10,10, 8, 9,10, 6,15, 8,15, 3, 6, 6, 8,
+	15, 3,15,15,15,15,15,15,15,15,15,15, 3,15,15, 8
+};
+
+static const uint8_t bc7_interpolation_weights_2[4]  = { 0, 21, 43, 64 };
+static const uint8_t bc7_interpolation_weights_3[8]  = { 0, 9, 18, 27, 37, 46, 55, 64 };
+static const uint8_t bc7_interpolation_weights_4[16] = { 0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64 };
+
+struct bc7_mode_info
+{
+	uint8_t subsets;          // number of subsets
+	uint8_t partition_bits;   // number of bits of the partition index
+	uint8_t rotation_bits;    // number of bits of the channel rotation
+	uint8_t index_sel_bits;   // number of bits of the index selection (mode 4 only)
+	uint8_t color_bits;       // endpoint color precision (without p-bit)
+	uint8_t alpha_bits;       // endpoint alpha precision (without p-bit)
+	uint8_t endpoint_pbits;   // 1 if each endpoint has its own p-bit
+	uint8_t shared_pbits;     // 1 if both endpoints of a subset share one p-bit
+	uint8_t index_bits;       // bits per (color) index
+	uint8_t index_bits_2;     // bits per alpha index (modes 4 and 5, separate alpha indices)
+};
+
+static const bc7_mode_info bc7_modes[8] =
+{
+	// NS  PB  RB  ISB  CB  AB  EPB SPB  IB  IB2
+	{  3,  4,  0,  0,   4,  0,  1,  0,   3,  0 }, // mode 0
+	{  2,  6,  0,  0,   6,  0,  0,  1,   3,  0 }, // mode 1
+	{  3,  6,  0,  0,   5,  0,  0,  0,   2,  0 }, // mode 2
+	{  2,  6,  0,  0,   7,  0,  1,  0,   2,  0 }, // mode 3
+	{  1,  0,  2,  1,   5,  6,  0,  0,   2,  3 }, // mode 4
+	{  1,  0,  2,  0,   7,  8,  0,  0,   2,  2 }, // mode 5
+	{  1,  0,  0,  0,   7,  7,  1,  0,   4,  0 }, // mode 6
+	{  2,  6,  0,  0,   5,  5,  1,  0,   2,  0 }  // mode 7
+};
+
+// Reads "count" bits (LSB first) from a 128-bit block
+static uint32_t bc7_read_bits(const uint8_t *block, uint32_t &bit_pos, uint32_t count)
+{
+	uint32_t value = 0;
+	for (uint32_t i = 0; i < count; ++i, ++bit_pos)
+		value |= static_cast<uint32_t>((block[bit_pos >> 3] >> (bit_pos & 7)) & 1) << i;
+	return value;
+}
+
+// Expands a value of "bits" bits to 8 bits by bit replication
+static uint8_t bc7_expand_to_8_bits(uint32_t value, uint32_t bits)
+{
+	value <<= (8 - bits);
+	return static_cast<uint8_t>(value | (value >> bits));
+}
+
+static uint8_t bc7_interpolate(uint8_t e0, uint8_t e1, uint32_t index, uint32_t index_bits)
+{
+	const uint32_t weight =
+		index_bits == 2 ? bc7_interpolation_weights_2[index] :
+		index_bits == 3 ? bc7_interpolation_weights_3[index] :
+		                  bc7_interpolation_weights_4[index];
+	return static_cast<uint8_t>(((64 - weight) * e0 + weight * e1 + 32) >> 6);
+}
+
+// Decodes one 16 bytes BC7 block into 16 RGBA texels (row major, 4x4)
+static void unpack_bc7_block(const uint8_t src[16], uint8_t rgba[16][4])
+{
+	uint32_t bit_pos = 0;
+
+	// The mode is given by the position of the first bit set to 1 (unary code)
+	uint32_t mode = 0;
+	while (mode < 8 && bc7_read_bits(src, bit_pos, 1) == 0)
+		++mode;
+
+	if (mode >= 8)
+	{
+		// Reserved mode : the spec says to return a zero block
+		std::memset(rgba, 0, 16 * 4);
+		return;
+	}
+
+	const bc7_mode_info &m = bc7_modes[mode];
+
+	const uint32_t partition = bc7_read_bits(src, bit_pos, m.partition_bits);
+	const uint32_t rotation  = bc7_read_bits(src, bit_pos, m.rotation_bits);
+	const uint32_t index_sel = bc7_read_bits(src, bit_pos, m.index_sel_bits);
+
+	// Endpoints : index = subset * 2 + (0 for the first endpoint, 1 for the second one)
+	uint32_t endpoints[6][4] = {};
+	const uint32_t num_endpoints = m.subsets * 2;
+
+	for (uint32_t c = 0; c < 3; ++c)
+		for (uint32_t e = 0; e < num_endpoints; ++e)
+			endpoints[e][c] = bc7_read_bits(src, bit_pos, m.color_bits);
+	if (m.alpha_bits != 0)
+		for (uint32_t e = 0; e < num_endpoints; ++e)
+			endpoints[e][3] = bc7_read_bits(src, bit_pos, m.alpha_bits);
+
+	// P-bits : appended as the LSB of the endpoint values
+	uint32_t color_precision = m.color_bits;
+	uint32_t alpha_precision = m.alpha_bits;
+	if (m.endpoint_pbits || m.shared_pbits)
+	{
+		uint32_t pbits[6];
+		if (m.endpoint_pbits)
+			for (uint32_t e = 0; e < num_endpoints; ++e)
+				pbits[e] = bc7_read_bits(src, bit_pos, 1);
+		else
+			for (uint32_t s = 0; s < m.subsets; ++s)
+				pbits[s * 2] = pbits[s * 2 + 1] = bc7_read_bits(src, bit_pos, 1);
+
+		for (uint32_t e = 0; e < num_endpoints; ++e)
+		{
+			for (uint32_t c = 0; c < 3; ++c)
+				endpoints[e][c] = (endpoints[e][c] << 1) | pbits[e];
+			if (m.alpha_bits != 0)
+				endpoints[e][3] = (endpoints[e][3] << 1) | pbits[e];
+		}
+		color_precision += 1;
+		if (m.alpha_bits != 0)
+			alpha_precision += 1;
+	}
+
+	// Expand the endpoints to 8 bits
+	uint8_t ep[6][4];
+	for (uint32_t e = 0; e < num_endpoints; ++e)
+	{
+		for (uint32_t c = 0; c < 3; ++c)
+			ep[e][c] = bc7_expand_to_8_bits(endpoints[e][c], color_precision);
+		ep[e][3] = m.alpha_bits != 0 ? bc7_expand_to_8_bits(endpoints[e][3], alpha_precision) : 255;
+	}
+
+	// Subset of each texel
+	uint8_t subset_of[16];
+	for (uint32_t i = 0; i < 16; ++i)
+		subset_of[i] = m.subsets == 1 ? 0 : bc7_partition_table[m.subsets - 2][partition][i];
+
+	// Anchor texel of each subset : its index is stored with one bit less
+	uint32_t anchors[3] = { 0, 0, 0 };
+	if (m.subsets == 2)
+		anchors[1] = bc7_anchor_index_2_subsets[partition];
+	else if (m.subsets == 3)
+	{
+		anchors[1] = bc7_anchor_index_3_subsets_2[partition];
+		anchors[2] = bc7_anchor_index_3_subsets_3[partition];
+	}
+
+	auto is_anchor = [&](uint32_t texel) {
+		for (uint32_t s = 0; s < m.subsets; ++s)
+			if (anchors[s] == texel)
+				return true;
+		return false;
+	};
+
+	// First set of indices (color indices, or color + alpha indices when there is no separate alpha set)
+	uint8_t indices[16];
+	for (uint32_t i = 0; i < 16; ++i)
+		indices[i] = static_cast<uint8_t>(bc7_read_bits(src, bit_pos, is_anchor(i) ? m.index_bits - 1 : m.index_bits));
+
+	// Second set of indices (modes 4 and 5 only), only texel 0 is an anchor
+	uint8_t indices_2[16] = {};
+	if (m.index_bits_2 != 0)
+		for (uint32_t i = 0; i < 16; ++i)
+			indices_2[i] = static_cast<uint8_t>(bc7_read_bits(src, bit_pos, i == 0 ? m.index_bits_2 - 1 : m.index_bits_2));
+
+	for (uint32_t i = 0; i < 16; ++i)
+	{
+		const uint32_t s = subset_of[i];
+		const uint8_t *const e0 = ep[s * 2];
+		const uint8_t *const e1 = ep[s * 2 + 1];
+
+		uint8_t px[4];
+		if (m.index_bits_2 == 0)
+		{
+			for (uint32_t c = 0; c < 4; ++c)
+				px[c] = bc7_interpolate(e0[c], e1[c], indices[i], m.index_bits);
+		}
+		else
+		{
+			// Color and alpha use different index sets, which can be swapped in mode 4
+			const uint32_t color_index_bits = index_sel ? m.index_bits_2 : m.index_bits;
+			const uint32_t alpha_index_bits = index_sel ? m.index_bits   : m.index_bits_2;
+			const uint8_t color_index = index_sel ? indices_2[i] : indices[i];
+			const uint8_t alpha_index = index_sel ? indices[i]   : indices_2[i];
+
+			for (uint32_t c = 0; c < 3; ++c)
+				px[c] = bc7_interpolate(e0[c], e1[c], color_index, color_index_bits);
+			px[3] = bc7_interpolate(e0[3], e1[3], alpha_index, alpha_index_bits);
+		}
+
+		// Channel rotation : 0 = none, 1 = swap R/A, 2 = swap G/A, 3 = swap B/A
+		if (rotation != 0)
+			std::swap(px[3], px[rotation - 1]);
+
+		for (uint32_t c = 0; c < 4; ++c)
+			rgba[i][c] = px[c];
+	}
 }
 
 // ************************************************************************************************************
@@ -507,6 +802,32 @@ bool save_texture_image(const resource_desc &desc, const subresource_data &data,
 						unpack_bc4_value(green_0, green_1, (green_i >> (3 * (y * 4 + x))) & 0x7, dst + 1);
 						dst[2] = 0;
 						dst[3] = 255;
+					}
+				}
+			}
+		}
+		break;
+	case format::bc7_typeless:
+	case format::bc7_unorm:
+	case format::bc7_unorm_srgb:
+		// See https://docs.microsoft.com/windows/win32/direct3d11/bc7-format
+		for (size_t block_y = 0; block_y < block_count_y; ++block_y, data_p += data.row_pitch)
+		{
+			for (size_t block_x = 0; block_x < block_count_x; ++block_x)
+			{
+				uint8_t texels[16][4];
+				unpack_bc7_block(data_p + block_x * 16, texels);
+
+				for (size_t y = 0; y < 4; ++y)
+				{
+					for (size_t x = 0; x < 4; ++x)
+					{
+						// Skip the padding texels of blocks that go beyond the texture size
+						if (block_x * 4 + x >= desc.texture.width || block_y * 4 + y >= desc.texture.height)
+							continue;
+
+						uint8_t *const dst = rgba_pixel_data.data() + ((block_y * 4 + y) * desc.texture.width + (block_x * 4 + x)) * 4;
+						std::memcpy(dst, texels[y * 4 + x], 4);
 					}
 				}
 			}

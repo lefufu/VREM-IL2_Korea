@@ -48,8 +48,8 @@
 #include "addon_functions.h"
 #include "addon_logs.h"
 
-#include "export_texture.hpp"
-#include "export_CB.hpp"
+#include "export_texture_DX12.hpp"
+#include "export_CB_DX12.hpp"
 
 using namespace reshade::api;
 
@@ -66,9 +66,11 @@ void dump_text_cb(command_list* cmd_list, shader_stage stages, pipeline_layout l
 #endif
 
 	}
-	
+
+	auto& state = cmd_list->get_private_data<CmdData>();
+
 	//export textures for hunting if requested
-	if (flag_capture && a_shared.flag_texture_dump && g_shared_state->save_texture_flag && update.type == descriptor_type::shader_resource_view)
+	if (flag_capture && state.flag_texture_dump && g_shared_state->save_texture_flag && update.type == descriptor_type::shader_resource_view)
 	{
 		TextureExporter g_exporter;
 		g_exporter.export_descriptors(
@@ -84,7 +86,7 @@ void dump_text_cb(command_list* cmd_list, shader_stage stages, pipeline_layout l
 
 	}
 
-	if (flag_capture && a_shared.flag_cb_dump && g_shared_state->save_cb_flag && update.type == descriptor_type::constant_buffer)
+	if (flag_capture && state.flag_cb_dump && g_shared_state->save_cb_flag && update.type == descriptor_type::constant_buffer)
 	{
 		ConstantBufferExporter cb_exporter;
 		cb_exporter.export_constant_buffers(
@@ -153,14 +155,22 @@ extern "C" {
 		// for hunting and texture / CB dump
 		dump_text_cb(cmd_list, stages, layout, param_index, update);
 #endif
-		// to limit processing only when a tracking is setup n;
-		if ( !track_for_texture && !a_shared.render_technique && (((a_shared.cb_inject_values.hazeReduction == 1.0 && a_shared.cb_inject_values.gCockpitIBL == 1.0) && a_shared.VREM_setting[SET_MISC]) || !a_shared.VREM_setting[SET_MISC]) )
+		// to limit processing only when a tracking is setup 
+		auto& st = cmd_list->get_private_data<CmdData>();
+
+		// if ( !track_for_texture && !a_shared.render_technique && (((a_shared.cb_inject_values.hazeReduction == 1.0 && a_shared.cb_inject_values.gCockpitIBL == 1.0) && a_shared.VREM_setting[SET_MISC]) || !a_shared.VREM_setting[SET_MISC]) )
+		if (!st.flag_cb_dump && !st.flag_texture_dump)
 		{
 #if _DEBUG_CRASH 
 			reshade::log::message(reshade::log::level::info, "***** addon - vrem_on_push_descriptors ended (no track)");
 #endif
 			return;
 		}
+
+		//for CB dump
+#ifdef _DEBUG
+		track_root_descriptors(cmd_list, layout, param_index, update);
+#endif
 
 		// read CB to get original values for reflection control using cperframe CB
 		if ((a_shared.cb_inject_values.hazeReduction != 1.0 || a_shared.cb_inject_values.gCockpitIBL != 1.0) && a_shared.VREM_setting[SET_MISC])

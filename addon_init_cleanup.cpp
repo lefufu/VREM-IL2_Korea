@@ -179,8 +179,8 @@ extern "C" {
 		a_shared.technique_compiled = false;
 
 		// some init to do once per library launch
-		a_shared.flag_texture_dump = false;
-		a_shared.flag_cb_dump = false;
+		//a_shared.flag_texture_dump = false;
+		//a_shared.flag_cb_dump = false;
 
 		a_shared.VREM_setting[SET_DEFAULT] = 0;
 		
@@ -263,6 +263,10 @@ extern "C" {
 			g_shared_state->PSshader_list.clear();
 
 			a_shared.texture_to_read = true;
+
+#ifdef _DEBUG
+			release_pending_exports(g_shared_state->device);
+#endif
 
 		}
 

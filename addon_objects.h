@@ -108,6 +108,8 @@ static const int  GCOCKPITIBL_Y_SAVE = 1;
 
 // for descriptor table update
 #define DESCRIPTOR_TABLE_SIZE 16
+static const int ROOT_PARAM_MAX = 32;
+static const int ROOT_CB_DUMP_SIZE = 4096;
 
 //*****************************************************************************
 // for techniques
@@ -321,8 +323,19 @@ extern reshade::api::buffer_range  g_range[2];
 //extern ShaderInjectData            g_settings;
 // extern std::atomic<bool>           g_dirty;
 // extern std::unordered_map<uint64_t, pipeline_info> g_pipeline_info;
+
 extern std::unordered_map<uint64_t, uint32_t>      g_layout_param_index;
 extern std::shared_mutex                           g_mutex;
+
+// last descriptor pushed by the game as a root descriptor (SetGraphicsRoot*View), per root parameter
+struct root_descriptor {
+	reshade::api::pipeline_layout layout = {};
+	reshade::api::descriptor_type type = {};
+	reshade::api::resource_view   view = {};     // SRV
+	reshade::api::buffer_range    range = {};    // CBV
+	bool                          valid = false;
+};
+
 
 struct __declspec(uuid("13A636BD-08E1-4A42-BFD4-E7102EE0E6E0"))
 	CmdData {
@@ -330,6 +343,8 @@ struct __declspec(uuid("13A636BD-08E1-4A42-BFD4-E7102EE0E6E0"))
 	reshade::api::pipeline         pipeline = {};
 	reshade::api::pipeline_layout  layout = {};
 	reshade::api::descriptor_table tables[DESCRIPTOR_TABLE_SIZE] = {};
+	root_descriptor root_desc[ROOT_PARAM_MAX];
+
 	uint32_t table_count = 0;
 	Feature current_feature = Feature::Null;
 	uint32_t current_action = 0;
@@ -343,6 +358,8 @@ struct __declspec(uuid("13A636BD-08E1-4A42-BFD4-E7102EE0E6E0"))
 	reshade::api::pipeline_layout cb_layout = {};
 	uint32_t                      cb_index = 0;
 	uint32_t                      eye = 0;       // 0 = left, 1 = right
+	bool flag_texture_dump = false;
+	bool flag_cb_dump = false;
 };
 
 
@@ -514,9 +531,9 @@ struct __declspec(uuid("6598CABA-191D-4E3C-8D3E-F61427F2BA51")) addon_shared
 	pipeline cloned_constant_color_pipeline = {};
 
 	//for saving texture & CB
-	bool flag_texture_dump = false;
+	//bool flag_texture_dump = false;
 	uint32_t ps_hash_for_text_dump = 0;
-	bool flag_cb_dump = false;
+	// bool flag_cb_dump = false;
 	uint32_t ps_hash_for_cb_dump = 0;
 
 	// render targets
@@ -589,7 +606,7 @@ inline  std::unordered_map<uint32_t, Shader_Definition> shader_by_hash =
 	//** DEFAULT **
 	// to filter out call for GUI and MFD
 	// use also to get RT in VR !
-	{ 0xbaf52bc8, Shader_Definition(action_log | action_replace | action_inject_settings, Feature::GUI, L"hangar_test_PS.cso", 0, {SET_DEFAULT}) },
+	{ 0xbaf52bc8, Shader_Definition(action_log | action_replace | action_inject_settings | action_dump, Feature::GUI, L"hangar_test_PS.cso", 0, {SET_DEFAULT}) },
 	//{ 0xbaf52bc8, Shader_Definition(action_log | action_replace_bind, Feature::GUI, L"0xBAF52BC8.cso", 0, {SET_DEFAULT}) },
 	
 };

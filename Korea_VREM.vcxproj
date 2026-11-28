@@ -22,6 +22,7 @@
     <ClCompile Include="CDataFile.cpp" />
     <ClCompile Include="clone_pipeline.cpp" />
     <ClCompile Include="addon_init_cleanup.cpp" />
+    <ClCompile Include="dump_descriptors.cpp" />
     <ClCompile Include="DX12_constant_buffer.cpp" />
     <ClCompile Include="on_create_pipeline_layout.cpp" />
     <ClCompile Include="DX11_constant_buffer.cpp" />
@@ -34,7 +35,7 @@
     <ClCompile Include="on_init_swapchain.cpp" />
     <ClCompile Include="on_reshade_overlay.cpp" />
     <ClCompile Include="on_reshade_reloaded_effects.cpp" />
-    <ClCompile Include="process_pipeline_hash.cpp" />
+    <ClCompile Include="process_actions.cpp" />
     <ClCompile Include="save_render_target.cpp" />
     <ClCompile Include="save_shader_code.cpp" />
     <ClCompile Include="save_texture_image.cpp" />
@@ -63,8 +64,8 @@
     <ClInclude Include="addon_injection.h" />
     <ClInclude Include="addon_chrono.hpp" />
     <ClInclude Include="CDataFile.h" />
-    <ClInclude Include="export_CB.hpp" />
-    <ClInclude Include="export_texture.hpp" />
+    <ClInclude Include="export_CB_DX12.hpp" />
+    <ClInclude Include="export_texture_DX12.hpp" />
     <ClInclude Include="to_string.hpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
